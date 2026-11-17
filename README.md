@@ -1,0 +1,68 @@
+# Modeus Interviewer
+
+Основа MVP: FastAPI + SQLAlchemy/Alembic + React/TypeScript/Vite. Сейчас реализованы запуск, миграции пользователей и сессий, вход/выход и проверка LLM. Интервью и карточки — следующие шаги.
+
+Порядок работ: [короткий план](Modeus_MVP_Short_Implementation_Plan.md). Интерфейсы и ответственность: [технический контракт](Modeus_MVP_Technical_Contract.md). Итоги аудита: [шаг 1](docs/Step_1_Audit.md).
+
+## Локальный запуск (PowerShell, из корня проекта)
+
+Проверено на Python 3.14.6 и Node.js 24.20.0. Нужны Python 3.12+ и Node.js 22.12+; исполняемый Python должен работать, а не быть заглушкой Microsoft Store.
+
+```powershell
+python -m venv .venv
+.venv/Scripts/python.exe -m ensurepip
+.venv/Scripts/python.exe -m pip install -r requirements.lock
+Copy-Item .env.example .env
+New-Item -ItemType Directory -Force .work | Out-Null
+.venv/Scripts/python.exe -m alembic upgrade head
+.venv/Scripts/python.exe -m backend.cli create-user your-email@example.com --editor
+npm ci --prefix frontend
+```
+
+Пароль вводится интерактивно, в историю команд не попадает. Без `--editor` создаётся обычный участник. Саморегистрации нет: пилотных участников создаёт команда. Готовых паролей в репозитории нет. Повторное копирование `.env.example` поверх настроенного `.env` не требуется.
+
+Терминал 1:
+
+```powershell
+.venv/Scripts/python.exe -m uvicorn backend.app:create_app --factory --host 127.0.0.1 --port 8000
+```
+
+Терминал 2:
+
+```powershell
+npm run dev --prefix frontend
+```
+
+Открыть **http://localhost:5173** (именно localhost: `APP_ORIGIN` должен совпадать). Vite проксирует `/api` на backend, браузер работает с одним origin. OpenAPI: http://127.0.0.1:8000/docs. Локальная БД — `.work/modeus.db`, она исключена из Git. Миграции выполняются явно, приложение не создаёт таблицы при импорте.
+
+## Вход и ограничения текущего запуска
+
+Почта/пароль → случайный непрозрачный токен в HttpOnly, SameSite=Lax cookie. В БД — только SHA-256 токена; срок по умолчанию 12 часов, выход отзывает сессию. Пароли хранятся как salted scrypt. Изменяющие auth-запросы требуют точного заголовка Origin; после пяти неверных паролей аккаунт блокируется на 15 минут. Общая зависимость `backend.auth.current_user` предназначена для будущих API интервью и карточек.
+
+Это конфигурация локальной разработки: `COOKIE_SECURE=false`, сервер слушает loopback. Перед внешним пилотом нужны HTTPS, `COOKIE_SECURE=true`, реальный `APP_ORIGIN`, ограничение частоты на reverse proxy, резервирование БД и проверка её прав. Клиент не хранит токен в localStorage. Остальные изменяющие API ещё не реализованы; их версии и идемпотентность определяет контракт.
+
+## LLM: настоящий проверочный запрос
+
+В `.env` указать `LLM_BASE_URL` (точный OpenAI-совместимый API root), `LLM_MODEL` и при необходимости `LLM_API_KEY`. Затем:
+
+```powershell
+.venv/Scripts/python.exe -m backend.cli check-llm
+```
+
+Команда отправляет короткий запрос с JSON Schema и проверяет `{"ok":true}`. Ненастроенная модель, недоступный провайдер или неподдерживаемый structured output завершают проверку с ошибкой; заглушки нет. Ключ не передаётся frontend и не печатается. API-провайдер может тарифицировать этот запрос. В этой сессии провайдер не настроен, реальное подключение пока не подтверждено.
+
+## Проверки
+
+```powershell
+.venv/Scripts/python.exe -m pytest -q
+.venv/Scripts/python.exe scripts/smoke.py
+npm run build --prefix frontend
+```
+
+Тесты создают отдельную временную БД миграцией. Smoke запускает и останавливает собственный сервер. Для текущего проекта установлены фиксированные зависимости в `requirements.lock` и `frontend/package-lock.json`.
+
+## PostgreSQL и дальнейшая разработка
+
+Локально выбран SQLite: Docker daemon недоступен. Для командного сервера выбран PostgreSQL; совместимость требует отдельного прогона миграций и тестов на нём. Установить `psycopg[binary]`, задать `DATABASE_URL=postgresql+psycopg://...`, выполнить миграции. Это переключение не переносит существующие данные из SQLite автоматически. Не использовать одну SQLite-БД с нескольких машин.
+
+Модули: `backend/app.py` — API; `backend/auth.py` и `security.py` — вход; `db.py` — хранение; `llm.py` — проверка модели; `frontend/src` — web; `migrations` — последовательные миграции. Текущая вершина — `0001`. Роль 2 ведёт основу/вход/API интервью, роль 4 добавляет карточки после `0001`, роль 3 — web, роль 1 — темы и сценарии.

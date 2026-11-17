@@ -1,0 +1,38 @@
+# Local working files
+.work/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.log
+*.tmp
+*.swp
+*~
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+!.env.*.example
+.aws/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node.js and build output
+node_modules/
+dist/
+build/
+coverage/
+.next/
+
+# Local editor settings
+.idea/
+.vscode/

@@ -1,4 +1,6 @@
+import asyncio
 import secrets
+from contextlib import suppress
 from contextlib import asynccontextmanager
 from datetime import timedelta
 
@@ -10,6 +12,8 @@ from sqlalchemy import select
 
 from backend.db import LoginSession, User, database, now
 from backend.auth import current_user
+from backend.interview_api import router as interview_router
+from backend.interview_worker import run_worker
 from backend.security import check_password, hash_password, token_hash
 from backend.settings import Settings
 
@@ -26,18 +30,26 @@ def create_app(settings: Settings | None = None):
 
     @asynccontextmanager
     async def lifespan(app):
-        yield
-        engine.dispose()
+        worker = asyncio.create_task(run_worker(sessions, settings))
+        try:
+            yield
+        finally:
+            worker.cancel()
+            with suppress(asyncio.CancelledError):
+                await worker
+            engine.dispose()
 
     app = FastAPI(title="Modeus MVP", version="0.1.0", lifespan=lifespan)
     app.state.engine = engine
     app.state.sessions = sessions
+    app.state.app_origin = settings.app_origin
+    app.include_router(interview_router)
 
     @app.exception_handler(HTTPException)
     async def error_handler(request, exc):
-        return JSONResponse(status_code=exc.status_code, content={"error": {
-            "code": exc.detail, "message": exc.detail, "retryable": False,
-            "request_id": secrets.token_hex(8),
+        detail = exc.detail if isinstance(exc.detail, dict) else {"code": exc.detail, "message": exc.detail}
+        return JSONResponse(status_code=exc.status_code, headers=exc.headers, content={"error": {
+            "retryable": False, "request_id": secrets.token_hex(8), **detail,
         }})
 
     @app.exception_handler(RequestValidationError)

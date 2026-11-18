@@ -1,43 +1,96 @@
-import {useState, useEffect, type FormEvent} from 'react';
-import {createRoot} from 'react-dom/client';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { createRoot } from 'react-dom/client';
+import { api, ApiError, command, describe } from './api';
+import { InterviewHome } from './InterviewHome';
+import { InterviewScreen } from './InterviewScreen';
 import './style.css';
 
-type User = {id: string; is_editor: boolean};
+type User = { id: string; is_editor: boolean };
+
+function currentInterview() {
+  return window.location.hash.match(/^#\/interviews\/([a-zA-Z0-9_-]+)$/)?.[1];
+}
+
 function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  useEffect(() => {fetch('/api/v1/me').then(async r => {
-    if (r.ok) setUser(await r.json());
-    else if (r.status !== 401) setError('Не удалось проверить вход.');
-  }).catch(() => setError('Сервер недоступен.')).finally(() => setLoading(false));}, []);
-  async function login(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setBusy(true); setError('');
-    const form = event.currentTarget;
-    const data = new FormData(form);
-    try {
-      const r = await fetch('/api/v1/auth/login', {method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({email: data.get('email'), password: data.get('password')})});
-      if (!r.ok) throw new Error(r.status === 429 ? 'Слишком много попыток. Повторите через 15 минут.' : 'Не удалось войти. Проверьте данные.');
-      setUser(await r.json()); form.reset();
-    } catch (e) {setError(e instanceof Error ? e.message : 'Сервер недоступен.');}
-    finally {setBusy(false);}
+  const [interviewId, setInterviewId] = useState(currentInterview);
+  const lock = useRef(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    api<User>('/me', { signal: controller.signal }).then(setUser).catch(error => {
+      if (!controller.signal.aborted && !(error instanceof ApiError && error.status === 401)) {
+        setError(describe(error));
+      }
+    }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    function readLocation() { setInterviewId(currentInterview()); }
+    window.addEventListener('hashchange', readLocation);
+    return () => window.removeEventListener('hashchange', readLocation);
+  }, []);
+
+  const expireSession = useCallback(() => {
+    setUser(null);
+    setError('Сессия закончилась. Войдите снова.');
+  }, []);
+
+  async function auth(task: () => Promise<void>) {
+    if (lock.current) return;
+    lock.current = true;
+    setBusy(true);
+    setError('');
+    try { await task(); }
+    catch (e) { setError(describe(e)); }
+    finally { lock.current = false; setBusy(false); }
   }
-  async function logout() {
-    setBusy(true); setError('');
-    try {const r = await fetch('/api/v1/auth/logout', {method: 'POST'});
-      if (!r.ok) throw new Error(); setUser(null);
-    } catch {setError('Не удалось выйти. Повторите.');} finally {setBusy(false);}
+
+  function login(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    void auth(async () => {
+      setUser(await command<User>('/auth/login', { email: data.get('email'), password: data.get('password') }));
+    });
   }
-  return <main><p className="brand">MODEUS</p><h1>Профессиональный опыт начинается с разговора.</h1>
-    {loading ? <p>Проверяем вход…</p> : user ? <section><h2>Вы вошли</h2>
-      <p>{user.is_editor ? 'Доступ редактора' : 'Доступ участника'}</p>
-      <p>Основа приложения готова. Интервью появится на следующем этапе разработки.</p>
-      <button disabled={busy} onClick={logout}>Выйти</button></section> : <form onSubmit={login}>
-      <h2>Вход участника</h2><label>Почта<input type="email" name="email" autoComplete="username" required maxLength={254}/></label>
-      <label>Пароль<input type="password" name="password" autoComplete="current-password" required maxLength={256}/></label>
-      <button disabled={busy}>{busy ? 'Входим…' : 'Войти'}</button></form>}
-    {error && <p role="alert">{error}</p>}</main>;
+
+  function logout() {
+    void auth(async () => {
+      await api<void>('/auth/logout', { method: 'POST' });
+      window.location.hash = '';
+      setUser(null);
+    });
+  }
+
+  return <main>
+    <header className="masthead">
+      <a className="brand" href="#" aria-label="Modeus, мои интервью">MODEUS</a>
+      {user && <div className="account"><span>{user.is_editor ? 'Доступ редактора' : 'Доступ участника'}</span>
+        <button className="quiet" disabled={busy} onClick={logout}>Выйти</button></div>}
+    </header>
+    {loading ? <p role="status">Проверяем вход…</p> : !user ?
+      <form className="panel login" onSubmit={login}>
+        <h1>Вход в Modeus</h1>
+        <fieldset disabled={busy}>
+          <label htmlFor="email">Почта</label>
+          <input id="email" type="email" name="email" autoComplete="username" required maxLength={254}/>
+          <label htmlFor="password">Пароль</label>
+          <input id="password" type="password" name="password" autoComplete="current-password" required maxLength={256}/>
+          <button>{busy ? 'Входим…' : 'Войти'}</button>
+        </fieldset>
+      </form> : interviewId ? <>
+        <a className="back" href="#">← Мои интервью</a>
+        <InterviewScreen key={interviewId} id={interviewId} onSessionExpired={expireSession}/>
+      </> : <>
+        <h1>Интервью о рабочем опыте</h1>
+        <InterviewHome onOpen={id => { window.location.hash = `/interviews/${id}`; }} onSessionExpired={expireSession}/>
+      </>}
+    {error && <p role="alert">{error}</p>}
+  </main>;
 }
+
 createRoot(document.getElementById('root')!).render(<App/>);

@@ -1,0 +1,36 @@
+{
+  "create": {
+    "topic_id": "sql-slow-query",
+    "context": {"role": "Backend-разработчик", "experience": "3 года", "responsibilities": "Поддержка отчётов", "conditions": "PostgreSQL"}
+  },
+  "draft": {"expected_version": 2, "question_id": "q1", "text": "Добавил индекс."},
+  "submit": {"expected_version": 3},
+  "accepted": {
+    "interview": {
+      "id": "i1", "topic_id": "sql-slow-query",
+      "context": {"role": "Backend-разработчик", "experience": "3 года", "responsibilities": "Поддержка отчётов", "conditions": "PostgreSQL"},
+      "version": 4, "status": "active", "processing_status": "queued", "processing_stage": "extraction",
+      "current_question_id": "q1", "card_id": null, "error": null,
+      "created_at": "2026-11-18T09:00:00Z", "updated_at": "2026-11-18T09:02:00Z"
+    },
+    "answer": {
+      "id": "a1", "session_id": "i1", "sequence": 2, "kind": "answer",
+      "text": "Добавил индекс.", "reply_to_question_id": "q1", "status": "queued",
+      "created_at": "2026-11-18T09:01:00Z", "updated_at": "2026-11-18T09:02:00Z"
+    }
+  },
+  "extraction": {
+    "message_id": "a1", "schema_version": 1,
+    "facts": [{"id": "f1", "field": "action", "text": "Добавил индекс.", "supporting_message_ids": ["a1"]}],
+    "gaps": [{"field": "decision", "status": "unknown"}, {"field": "verification", "status": "unknown"}],
+    "declined_intents": [], "new_topic_notes": []
+  },
+  "next_question": {
+    "id": "q2", "session_id": "i1", "sequence": 3, "kind": "question",
+    "text": "Почему в этом случае вы решили добавить индекс?", "status": "processed",
+    "created_at": "2026-11-18T09:02:10Z", "updated_at": "2026-11-18T09:02:10Z"
+  },
+  "conflict": {
+    "error": {"code": "VERSION_CONFLICT", "message": "Состояние изменилось. Обновите данные.", "retryable": false, "request_id": "req1", "current_version": 4}
+  }
+}

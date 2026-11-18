@@ -1,5 +1,6 @@
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Literal
 
 
 class Settings(BaseSettings):
@@ -12,3 +13,4 @@ class Settings(BaseSettings):
     llm_model: str = ""
     llm_api_key: str = Field(default="", repr=False)
     llm_timeout_seconds: int = Field(default=45, ge=1, le=120)
+    llm_reasoning_effort: Literal["", "none", "low", "medium", "high"] = ""

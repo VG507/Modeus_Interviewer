@@ -2,9 +2,19 @@ from alembic import context
 from backend.db import Base, database
 from backend.settings import Settings
 
-engine, _ = database(Settings().database_url)
-with engine.connect() as connection:
+def migrate(connection):
     context.configure(connection=connection, target_metadata=Base.metadata, render_as_batch=True)
     with context.begin_transaction():
         context.run_migrations()
-engine.dispose()
+
+
+connection = context.config.attributes.get("connection")
+if connection is not None:
+    migrate(connection)
+else:
+    engine, _ = database(Settings().database_url)
+    try:
+        with engine.connect() as connection:
+            migrate(connection)
+    finally:
+        engine.dispose()

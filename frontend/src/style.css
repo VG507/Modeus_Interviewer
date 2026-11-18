@@ -1,1 +1,64 @@
-:root{font-family:system-ui,sans-serif;color:#162b2c;background:#f5f3ed}body{margin:0}main{max-width:680px;margin:8vh auto;padding:24px}.brand{letter-spacing:.2em;color:#316f63}h1{font-size:clamp(32px,5vw,48px);line-height:1.12}form,section{background:white;padding:28px;border-radius:16px;max-width:420px}label{display:block;margin:16px 0}input{display:block;width:100%;box-sizing:border-box;padding:12px;margin-top:6px;border:1px solid #aabbb5;border-radius:6px;font:inherit}button{padding:12px 24px;background:#225e51;color:white;border:0;border-radius:6px;font:inherit;cursor:pointer}button:disabled{opacity:.6;cursor:wait}[role=alert]{color:#982e23}button:focus-visible,input:focus-visible{outline:3px solid #c19136;outline-offset:3px}
+:root {
+  font: 16px/1.55 system-ui, sans-serif;
+  color: #162b2c;
+  background: #f5f3ed;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { max-width: 980px; margin: 0 auto; padding: 20px 24px 64px; }
+.masthead {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 12px; border-bottom: 1px solid #d4dbd4; padding-bottom: 16px; margin-bottom: 28px;
+}
+.brand { color: #225e51; letter-spacing: .18em; font-weight: 800; text-decoration: none; }
+.account, .actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.account { color: #4f625e; font-size: .875rem; }
+h1, h2 { line-height: 1.2; overflow-wrap: anywhere; }
+h1 { margin: 0 0 24px; font-size: clamp(1.85rem, 5vw, 2.75rem); letter-spacing: -.035em; }
+h2 { margin: 0 0 16px; font-size: 1.35rem; }
+p { margin: 0 0 12px; }
+.panel { min-width: 0; background: #fff; border: 1px solid #dce3dc; border-radius: 16px; padding: 24px; }
+.login { max-width: 440px; }
+.workspace { display: grid; grid-template-columns: 1.12fr 1fr; gap: 20px; align-items: start; }
+.workspace-error { grid-column: 1 / -1; }
+.stack { display: grid; gap: 20px; }
+fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+label { display: block; font-weight: 650; margin-bottom: 6px; }
+label span { color: #526763; font-size: .85rem; font-weight: 400; }
+input, select, textarea {
+  display: block; width: 100%; margin: 0 0 16px; padding: 10px 12px;
+  border: 1px solid #a5b5ae; border-radius: 8px; color: inherit; background: white; font: inherit;
+}
+textarea { resize: vertical; }
+button {
+  padding: 9px 14px; border: 1px solid #225e51; border-radius: 8px;
+  background: #225e51; color: white; font: inherit; font-weight: 650; cursor: pointer;
+}
+button.secondary { background: #edf4ef; color: #225e51; border-color: #b7c9c0; }
+button.quiet { background: transparent; color: #225e51; border-color: transparent; }
+button:not(:disabled):hover { filter: brightness(.92); }
+button:disabled { opacity: .55; cursor: not-allowed; }
+:focus-visible { outline: 3px solid #946c16; outline-offset: 3px; }
+[role=alert] { color: #942f25; margin-top: 12px; }
+.back { color: #225e51; display: inline-block; margin-bottom: 14px; }
+.saved ul, .transcript { margin: 0 0 16px; padding: 0; list-style: none; }
+.saved li + li { border-top: 1px solid #dce3dc; }
+.saved a { display: grid; gap: 3px; padding: 12px 4px; color: #225e51; }
+.saved a span, .saved time { color: #526763; font-size: .88rem; }
+.transcript { display: grid; gap: 12px; }
+.turn { padding: 14px 16px; border-radius: 12px; width: fit-content; max-width: min(90%, 700px); }
+.turn p, .card-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+.turn strong { display: block; font-size: .8rem; margin-bottom: 3px; color: #3d6156; }
+.turn small { display: block; margin-top: 6px; color: #526763; }
+.turn-question { background: #eef3ef; }
+.turn-answer { justify-self: end; background: #e2eee8; }
+.turn-control { justify-self: center; color: #526763; font-size: .875rem; }
+.composer, .finish { border-top: 1px solid #dce3dc; padding-top: 16px; margin-top: 16px; }
+.status { font-weight: 650; color: #225e51; }
+.feedback { padding: 12px 0; }
+@media (max-width: 720px) {
+  main { padding: 14px 14px 40px; }
+  .panel { padding: 16px; }
+  .workspace { grid-template-columns: 1fr; }
+  .turn { max-width: 96%; }
+}

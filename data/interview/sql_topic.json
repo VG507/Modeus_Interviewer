@@ -1,0 +1,23 @@
+{
+  "topic": {
+    "id": "sql-slow-query",
+    "profession_id": "python_backend",
+    "title": "Диагностика медленного SQL-запроса",
+    "source_ids": ["hh-adv-backend-airflow", "hh-python-django-sql"]
+  },
+  "sources": [
+    {
+      "id": "hh-adv-backend-airflow",
+      "url": "https://hh.ru/search/vacancy?enable_snippets=true&hhtmFrom=vacancy_search_list&ored_clusters=true&page=2&search_session_id=0e14435a-e2c2-448c-bcfd-3e91b6d9f233&text=java+developer&work_format=REMOTE",
+      "retrieved_on": "2026-11-18",
+      "text": "Python-разработчик (Backend, Airflow), АДВ. В индексированном фрагменте вакансии указаны разработка сервисов на FastAPI и оптимизация запросов PostgreSQL."
+    },
+    {
+      "id": "hh-python-django-sql",
+      "url": "https://hh.ru/search/vacancy?enable_snippets=true&hhtmFrom=vacancy_search_list&ored_clusters=true&page=0&search_session_id=62668cd5-e1fc-4505-86a0-6a33801844e0&text=python+developer&work_format=REMOTE",
+      "retrieved_on": "2026-11-18",
+      "text": "Middle Backend-разработчик (Python/Django). В индексированном фрагменте перечислены сложные SQL-запросы, JOIN, индексы и EXPLAIN."
+    }
+  ],
+  "opening_question": "Вспомните конкретный случай, когда вам пришлось разбираться с медленным SQL-запросом. По чему вы поняли, что проблема связана с запросом?"
+}

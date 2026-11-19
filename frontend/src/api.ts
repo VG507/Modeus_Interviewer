@@ -17,18 +17,36 @@ export type Interview = {
 };
 export type Detail = Interview & { messages: Message[] };
 export type AnswerResult = { interview: Interview; answer: Message };
-export type Card = { id: string; text: string; publication_status: string };
+export type CardContent = { title: string; cases?: CardContent[] } & Partial<Record<
+  'task' | 'context' | 'actions' | 'decisions' | 'verification' | 'errors' | 'limitations',
+  { text: string }[]
+>>;
+export type Card = {
+  id: string; session_id: string; owner_id: string; version: number; content_version: number;
+  text: string; content: CardContent; show_author: boolean; author_name: string | null;
+  publication_status: 'draft' | 'in_review' | 'published';
+  review_status: 'unreviewed' | 'needs_changes' | 'reviewed';
+  review: { decision: 'accept' | 'return' | 'keep_private' | 'unpublish'; comment: string } | null;
+};
+export type PublicSummary = {
+  id: string; title: string; profession_id: string; topic_title: string;
+  author_name: string | null; reviewed_at: string;
+};
+export type PublicCard = PublicSummary & { content: CardContent; text: string };
 export type Page<T> = { items: T[]; next_cursor: string | null };
 
 const messages: Record<string, string> = {
-  VERSION_CONFLICT: 'Интервью изменилось. Проверьте актуальное состояние перед повтором.',
+  VERSION_CONFLICT: 'Данные изменились. Проверьте актуальное состояние перед повтором.',
   PROCESSING_IN_PROGRESS: 'Ответ уже обрабатывается.',
-  INVALID_STATE: 'Действие недоступно в текущем состоянии интервью.',
+  INVALID_STATE: 'Действие недоступно в текущем состоянии.',
   INVALID_CREDENTIALS: 'Проверьте почту и пароль.',
   LOGIN_TEMPORARILY_LOCKED: 'Слишком много попыток. Повторите через 15 минут.',
   UNAUTHENTICATED: 'Сессия закончилась. Войдите снова.',
   INTERVIEW_NOT_FOUND: 'Интервью не найдено или недоступно.',
   TOPIC_NOT_FOUND: 'Тема больше недоступна.',
+  CARD_NOT_FOUND: 'Карточка не найдена или недоступна.',
+  CARD_UNCHANGED: 'В карточке нет изменений.',
+  EDITOR_REQUIRED: 'Для этого действия нужен доступ редактора.',
   ORIGIN_REJECTED: 'Откройте Modeus по адресу, заданному в APP_ORIGIN.',
   VALIDATION_ERROR: 'Проверьте заполнение и длину полей.',
   PROCESSING_TIMEOUT: 'Модель не успела ответить.',

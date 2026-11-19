@@ -368,7 +368,8 @@ def render_card(title, state, facts):
     for fact in facts:
         present.add(fact["field"])
         content[fields[fact["field"]]].append({
-            "id": fact["id"], "text": fact["text"], "supporting_message_ids": fact["supporting_message_ids"],
+            "id": fact["id"], "text": fact["text"], "source": "interview",
+            "supporting_message_ids": fact["supporting_message_ids"],
             **({"responsibility": fact.get("responsibility", "unknown")} if fact["field"] == "action" else {}),
         })
     ambiguous = {gap["field"] for gap in state["gaps"] if gap["status"] == "ambiguous"}

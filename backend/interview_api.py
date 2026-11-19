@@ -1,4 +1,4 @@
-"""Authenticated HTTP entry points for text interviews and their private drafts."""
+"""Authenticated HTTP entry points for text interviews."""
 
 import hashlib
 import json
@@ -64,6 +64,13 @@ def digest(value):
 
 
 def write_command(request, actor, key, body, execute, interview_id=None):
+    def load(db):
+        return owned(db, interview_id, actor["id"]) if interview_id else None
+
+    return versioned_command(request, actor, key, body, load, execute)
+
+
+def versioned_command(request, actor, key, body, load, execute):
     if request.headers.get("origin") != request.app.state.app_origin:
         raise HTTPException(403, "ORIGIN_REJECTED")
     if not key.strip():
@@ -81,26 +88,26 @@ def write_command(request, actor, key, body, execute, interview_id=None):
 
     try:
         with sessions.begin() as db:
-            interview = owned(db, interview_id, owner) if interview_id else None
+            resource = load(db)
             receipt = lookup(db)
             if receipt:
                 return receipt.result
-            if interview:
-                if body.expected_version != interview.version:
-                    conflict(interview.version)
-                interview.version += 1
+            if resource is not None:
+                if body.expected_version != resource.version:
+                    conflict(resource.version)
+                resource.version += 1
                 db.flush()
-            result = execute(db, interview).model_dump(mode="json")
+            result = execute(db, resource).model_dump(mode="json")
             db.add(CommandReceipt(id=receipt_id, owner_id=owner, body_digest=body_digest, result=result))
             return result
     except (StaleDataError, IntegrityError):
         with sessions() as db:
-            interview = owned(db, interview_id, owner) if interview_id else None
+            resource = load(db)
             receipt = lookup(db)
             if receipt:
                 return receipt.result
-            if interview and body.expected_version != interview.version:
-                conflict(interview.version)
+            if resource is not None and body.expected_version != resource.version:
+                conflict(resource.version)
         raise
 
 
@@ -263,32 +270,3 @@ def retry_interview(request: Request, actor: Actor, key: CommandKey, interview_i
         return interview_view(db, interview)
 
     return write_command(request, actor, key, body, retry, interview_id)
-
-
-def card_view(card):
-    return {
-        "id": card.id, "session_id": card.session_id, "origin": card.origin, "version": card.version,
-        "content_version": card.content_version, "publication_status": card.publication_status,
-        "review_status": card.review_status, "content": card.content, "text": card.text,
-        "created_at": utc(card.created_at), "updated_at": utc(card.updated_at),
-    }
-
-
-@router.get("/cards")
-def list_cards(request: Request, actor: Actor, limit: PageSize = 20, cursor: str | None = None):
-    with request.app.state.sessions() as db:
-        query = select(KnowledgeCard).where(KnowledgeCard.owner_id == actor["id"])
-        if cursor:
-            query = query.where(KnowledgeCard.id < cursor)
-        rows = list(db.scalars(query.order_by(KnowledgeCard.id.desc()).limit(limit + 1)))
-        return {"items": [card_view(row) for row in rows[:limit]],
-                "next_cursor": rows[limit - 1].id if len(rows) > limit else None}
-
-
-@router.get("/cards/{card_id}")
-def read_card(request: Request, actor: Actor, card_id: str):
-    with request.app.state.sessions() as db:
-        card = db.get(KnowledgeCard, card_id)
-        if card is None or card.owner_id != actor["id"]:
-            raise HTTPException(404, "CARD_NOT_FOUND")
-        return card_view(card)

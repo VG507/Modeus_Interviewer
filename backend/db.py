@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, event
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, event, false
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 
@@ -106,8 +106,27 @@ class KnowledgeCard(Base):
     review_status: Mapped[str] = mapped_column(String(16), default="unreviewed")
     content: Mapped[dict] = mapped_column(JSON)
     text: Mapped[str] = mapped_column(Text)
+    show_author: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    author_name: Mapped[str | None] = mapped_column(String(120))
+    first_submitted_at: Mapped[datetime | None] = mapped_column(DateTime)
+    consent: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
+    review: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+    __mapper_args__ = {"version_id_col": version, "version_id_generator": False}
+
+
+class CardEvent(Base):
+    __tablename__ = "card_events"
+    __table_args__ = (UniqueConstraint("card_id", "version", name="uq_card_event_version"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    card_id: Mapped[str] = mapped_column(ForeignKey("knowledge_cards.id"))
+    actor_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    action: Mapped[str] = mapped_column(String(24))
+    version: Mapped[int] = mapped_column(Integer)
+    content_version: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    details: Mapped[dict] = mapped_column(JSON)
 
 
 def database(url):

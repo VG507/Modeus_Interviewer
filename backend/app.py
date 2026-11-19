@@ -12,6 +12,7 @@ from sqlalchemy import select
 
 from backend.db import LoginSession, User, database, now
 from backend.auth import current_user
+from backend.card_api import router as card_router
 from backend.interview_api import router as interview_router
 from backend.interview_worker import run_worker
 from backend.security import check_password, hash_password, token_hash
@@ -44,6 +45,7 @@ def create_app(settings: Settings | None = None):
     app.state.sessions = sessions
     app.state.app_origin = settings.app_origin
     app.include_router(interview_router)
+    app.include_router(card_router)
 
     @app.exception_handler(HTTPException)
     async def error_handler(request, exc):

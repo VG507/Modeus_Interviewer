@@ -3,20 +3,20 @@ import { createRoot } from 'react-dom/client';
 import { api, ApiError, command, describe } from './api';
 import { InterviewHome } from './InterviewHome';
 import { InterviewScreen } from './InterviewScreen';
+import { CardsList, CardScreen, CatalogCard } from './Cards';
 import './style.css';
 
 type User = { id: string; is_editor: boolean };
-
-function currentInterview() {
-  return window.location.hash.match(/^#\/interviews\/([a-zA-Z0-9_-]+)$/)?.[1];
-}
 
 function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [interviewId, setInterviewId] = useState(currentInterview);
+  const [route, setRoute] = useState(() => window.location.hash);
+  const interviewId = route.match(/^#\/interviews\/([a-zA-Z0-9_-]+)$/)?.[1];
+  const cardId = route.match(/^#\/cards\/([a-zA-Z0-9_-]+)$/)?.[1];
+  const catalogId = route.match(/^#\/catalog\/([a-zA-Z0-9_-]+)$/)?.[1];
   const lock = useRef(false);
 
   useEffect(() => {
@@ -30,7 +30,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    function readLocation() { setInterviewId(currentInterview()); }
+    function readLocation() { setRoute(window.location.hash); }
     window.addEventListener('hashchange', readLocation);
     return () => window.removeEventListener('hashchange', readLocation);
   }, []);
@@ -69,10 +69,18 @@ function App() {
   return <main>
     <header className="masthead">
       <a className="brand" href="#" aria-label="Modeus, мои интервью">MODEUS</a>
+      <nav className="actions" aria-label="Разделы Modeus">
+        <a href="#/catalog">Каталог</a>
+        {user && <a href="#/cards">Мои карточки</a>}
+        {user?.is_editor && <a href="#/review">Редактура</a>}
+        {!user && (route === '#/catalog' || catalogId) && <a href="#">Войти</a>}
+      </nav>
       {user && <div className="account"><span>{user.is_editor ? 'Доступ редактора' : 'Доступ участника'}</span>
         <button className="quiet" disabled={busy} onClick={logout}>Выйти</button></div>}
     </header>
-    {loading ? <p role="status">Проверяем вход…</p> : !user ?
+    {catalogId ? <CatalogCard key={catalogId} id={catalogId}/> : route === '#/catalog' ?
+      <CardsList key="catalog" scope="catalog" onSessionExpired={expireSession}/> :
+      loading ? <p role="status">Проверяем вход…</p> : !user ?
       <form className="panel login" onSubmit={login}>
         <h1>Вход в Modeus</h1>
         <fieldset disabled={busy}>
@@ -82,7 +90,12 @@ function App() {
           <input id="password" type="password" name="password" autoComplete="current-password" required maxLength={256}/>
           <button>{busy ? 'Входим…' : 'Войти'}</button>
         </fieldset>
-      </form> : interviewId ? <>
+      </form> : cardId ? <CardScreen key={cardId} id={cardId} user={user} onSessionExpired={expireSession}/> :
+      route === '#/cards' ? <CardsList key="own" scope="own" onSessionExpired={expireSession}/> :
+      route === '#/review' || route === '#/review/published' ?
+        user.is_editor ? <CardsList key={route} scope={route === '#/review' ? 'review' : 'published'}
+          onSessionExpired={expireSession}/> : <p role="alert">Для этого раздела нужен доступ редактора.</p> :
+      interviewId ? <>
         <a className="back" href="#">← Мои интервью</a>
         <InterviewScreen key={interviewId} id={interviewId} onSessionExpired={expireSession}/>
       </> : <>

@@ -13,6 +13,10 @@ main { max-width: 980px; margin: 0 auto; padding: 20px 24px 64px; }
 .brand { color: #225e51; letter-spacing: .18em; font-weight: 800; text-decoration: none; }
 .account, .actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .account { color: #4f625e; font-size: .875rem; }
+.masthead nav a, .cards-nav a, .card-link { color: #225e51; }
+.cards-nav { margin-bottom: 16px; }
+.cards-nav [aria-current] { font-weight: 700; text-decoration: none; }
+.card-link { display: inline-block; margin-top: 14px; }
 h1, h2 { line-height: 1.2; overflow-wrap: anywhere; }
 h1 { margin: 0 0 24px; font-size: clamp(1.85rem, 5vw, 2.75rem); letter-spacing: -.035em; }
 h2 { margin: 0 0 16px; font-size: 1.35rem; }
@@ -25,6 +29,8 @@ p { margin: 0 0 12px; }
 fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 label { display: block; font-weight: 650; margin-bottom: 6px; }
 label span { color: #526763; font-size: .85rem; font-weight: 400; }
+.check { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; }
+.check input { flex: none; width: auto; margin: 0; accent-color: #225e51; }
 input, select, textarea {
   display: block; width: 100%; margin: 0 0 16px; padding: 10px 12px;
   border: 1px solid #a5b5ae; border-radius: 8px; color: inherit; background: white; font: inherit;

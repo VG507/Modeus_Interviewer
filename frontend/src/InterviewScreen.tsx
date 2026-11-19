@@ -24,9 +24,12 @@ function CardPanel({ id, onSessionExpired }: { id: string; onSessionExpired: () 
     return () => controller.abort();
   }, [id, attempt, onSessionExpired]);
   return <section className="panel" aria-labelledby="card-title">
-    <h2 id="card-title">Приватный черновик</h2>
+      <h2 id="card-title">Карточка интервью</h2>
     {error ? <><p role="alert">{error}</p><button onClick={() => retry(n => n + 1)}>Повторить загрузку</button></>
-      : card ? <div className="card-text">{card.text}</div> : <p role="status">Загружаем карточку…</p>}
+        : card ? <>
+          <div className="card-text">{card.text}</div>
+          <a className="card-link" href={`#/cards/${card.id}`}>Открыть карточку</a>
+        </> : <p role="status">Загружаем карточку…</p>}
   </section>;
 }
 

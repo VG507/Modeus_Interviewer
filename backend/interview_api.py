@@ -15,7 +15,7 @@ from backend.db import CommandReceipt, InterviewSession, KnowledgeCard, Message,
 from backend.interview_engine import choose_intent
 from backend.interview_schemas import (
     AnswerResult, CaseState, CreateAnswer, CreateInterview, InterviewDetail,
-    InterviewView, MessageView, OPEN_TOPIC_ID, TopicSummary, UpdateAnswer, VersionedRequest,
+    InterviewView, MessageView, OPEN_TOPIC_ID, TopicSummary, UpdateAnswer, VacancyQuote, VersionedRequest,
 )
 from backend.interview_worker import advance_case, append_message, complete, messages_for, queue
 
@@ -30,9 +30,11 @@ def utc(value):
 
 
 def message_view(message):
+    source = next((item for item in message.market_sources or [] if item.get("used")), None)
     return MessageView.model_validate(message, from_attributes=True).model_copy(update={
         "created_at": utc(message.created_at), "updated_at": utc(message.updated_at),
         "assessment": (message.extraction or {}).get("assessment"),
+        "vacancy_quote": VacancyQuote(title=source["title"], url=source["url"], quote=source["task_excerpt"]) if source else None,
     })
 
 

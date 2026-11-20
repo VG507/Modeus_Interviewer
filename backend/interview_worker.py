@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import httpx
 from pydantic import ValidationError
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm.exc import StaleDataError
 
@@ -18,10 +18,12 @@ from backend.interview_engine import (
     choose_intent,
     extract,
     formulate,
+    formulate_question,
     render_card,
     synthesize,
 )
 from backend.interview_schemas import CaseState, OPEN_TOPIC_ID
+from backend.vacancy_context import sources_for_question
 
 logger = logging.getLogger(__name__)
 
@@ -72,23 +74,26 @@ def recent_history(db, interview, current_answer):
     return list(reversed(turns))
 
 
-def append_message(db, interview, *, kind, text, status="processed", reply_to_question_id=None):
-    previous = messages_for(db, interview.id)
+def append_message(db, interview, *, kind, text, status="processed", reply_to_question_id=None, market_sources=None):
+    last_sequence = db.scalar(select(func.max(Message.sequence)).where(Message.session_id == interview.id))
     message = Message(
-        id=str(uuid4()), session_id=interview.id, sequence=previous[-1].sequence + 1 if previous else 1,
-        kind=kind, text=text, status=status, reply_to_question_id=reply_to_question_id,
+        id=str(uuid4()), session_id=interview.id, sequence=(last_sequence or 0) + 1,
+        kind=kind, text=text, status=status, reply_to_question_id=reply_to_question_id, market_sources=market_sources,
     )
     db.add(message)
     return message
 
 
 def complete(db, interview):
-    for message in messages_for(db, interview.id):
-        if message.kind == "answer" and message.status == "queued":
+    pending = {}
+    if interview.processing_stage == "extraction":
+        pending = {key: interview.job[key] for key in ("answer_id", "current_intent")}
+        message = db.get(Message, pending["answer_id"])
+        if message.status == "queued":
             message.status = "failed"
     interview.status = "completing"
     interview.current_question_id = None
-    queue(interview, "synthesis", completion_version=interview.version)
+    queue(interview, "synthesis", completion_version=interview.version, **pending)
 
 
 def advance_case(db, interview):
@@ -151,14 +156,15 @@ async def execute_stage(sessions, settings, interview_id, token):
         message = db.get(Message, job["answer_id"]) if "answer_id" in job else None
         model_state = {**state, "intake": interview.context,
                        "recent_history": recent_history(db, interview, message)}
+        market_sources = sources_for_question(db, interview.context, state, job["intent"]) if stage == "question" else []
+        if market_sources:
+            model_state["market_context"] = [
+                {"task_excerpt": source["task_excerpt"], "skills": source["skills"]} for source in market_sources
+            ]
         answer = {"id": message.id, "text": message.text} if message else None
         question = db.get(Message, message.reply_to_question_id).text if message else None
-        if stage == "synthesis":
-            transcript = [
-                {"id": item.id, "kind": item.kind, "text": item.text}
-                for item in messages_for(db, interview_id) if item.status != "draft"
-            ]
 
+    final_extraction = None
     if stage == "initial_question":
         if state.get("open_interview") and job.get("new_case"):
             output = "Теперь вспомните другой рабочий случай. Что произошло и какую задачу нужно было решить?"
@@ -171,11 +177,22 @@ async def execute_stage(sessions, settings, interview_id, token):
     elif stage == "extraction":
         output = await extract(settings, question, answer, model_state)
     elif stage == "question":
-        output = await formulate(settings, title, job["intent"], answer, model_state)
+        if market_sources:
+            result = await formulate_question(settings, title, job["intent"], answer, model_state)
+            output = result.text
+            used_number = getattr(result, "source_number", None)
+            for number, source in enumerate(market_sources, start=1):
+                source["used"] = number == used_number
+        else:
+            output = await formulate(settings, title, job["intent"], answer, model_state)
     elif stage == "synthesis":
+        if answer is not None:
+            evidence = await extract(settings, question, answer, model_state)
+            state, final_extraction = apply_extraction(state, evidence, answer["id"], job["current_intent"])
+            title = state.get("discovered_topic") or title
         past = state.get("past_cases", [])
         if not past:
-            output = await synthesize(settings, title, state, transcript)
+            output = await synthesize(settings, title, state)
         else:
             cases = [*past, {"title": title, "state": state}] if state["facts"] else past
             # Render each case from its own evidence without sending an unbounded
@@ -209,6 +226,11 @@ async def execute_stage(sessions, settings, interview_id, token):
                     advance_case(db, interview)
             elif stage == "synthesis":
                 content, text = output
+                if final_extraction is not None:
+                    message = db.get(Message, answer["id"])
+                    message.extraction = final_extraction
+                    message.status = "processed"
+                    interview.case_state = state
                 db.add(KnowledgeCard(
                     session_id=interview.id, owner_id=interview.owner_id, origin=interview.origin,
                     completion_version=job["completion_version"], content=content, text=text,
@@ -216,7 +238,7 @@ async def execute_stage(sessions, settings, interview_id, token):
                 interview.status = "completed"
                 clear_job(interview)
             else:
-                message = append_message(db, interview, kind="question", text=output)
+                message = append_message(db, interview, kind="question", text=output, market_sources=market_sources or None)
                 interview.current_question_id = message.id
                 intent = "get_case" if stage == "initial_question" else job["intent"]
                 interview.case_state = {**state, "asked_intents": [*state["asked_intents"], intent]}

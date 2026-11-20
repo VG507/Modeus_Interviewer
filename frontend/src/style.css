@@ -25,10 +25,27 @@ p { margin: 0 0 12px; }
 .login { max-width: 440px; }
 .workspace { display: grid; grid-template-columns: 1.12fr 1fr; gap: 20px; align-items: start; }
 .workspace-error { grid-column: 1 / -1; }
+.vacancy-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+.market-muted { color: #526763; font-weight: 400; }
+.market-profiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.market-profile { display: grid; align-content: start; gap: 4px; width: 100%; height: 100%; text-align: left; }
+.market-profile span, .market-profile time { font-size: .85rem; font-weight: 400; }
+.market-profile[aria-pressed="true"] { border-color: #225e51; box-shadow: inset 0 0 0 1px #225e51; }
+.market-profile-actions { margin-top: 16px; }
+.market-progress { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 12px; border-radius: 8px; background: #eef3ef; }
+.market-progress small { color: #526763; }
+.market-spinner { flex: 0 0 18px; width: 18px; height: 18px; border: 2px solid #b7c9c0; border-top-color: #225e51; border-radius: 50%; animation: market-spin .8s linear infinite; }
+@keyframes market-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .market-spinner { animation: none; } }
 .stack { display: grid; gap: 20px; }
 fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 label { display: block; font-weight: 650; margin-bottom: 6px; }
-label span { color: #526763; font-size: .85rem; font-weight: 400; }
+label span, .interview-projects summary span { color: #526763; font-size: .85rem; font-weight: 400; }
+.interview-projects { margin-bottom: 16px; }
+.interview-projects summary { color: #225e51; font-weight: 650; cursor: pointer; }
+.interview-projects fieldset { margin: 12px 0; padding: 12px; border: 1px solid #dce3dc; border-radius: 8px; }
+.interview-projects legend { padding: 0 4px; }
+.interview-projects fieldset div:last-child input { margin-bottom: 0; }
 .check { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; }
 .check input { flex: none; width: auto; margin: 0; accent-color: #225e51; }
 input, select, textarea {
@@ -56,6 +73,9 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .turn p, .card-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
 .turn strong { display: block; font-size: .8rem; margin-bottom: 3px; color: #3d6156; }
 .turn small { display: block; margin-top: 6px; color: #526763; }
+.question-source { margin-top: 8px; color: #3d6156; font-size: .875rem; }
+.question-source summary { cursor: pointer; }
+.question-source blockquote { margin: 8px 0; padding-left: 10px; border-left: 2px solid #a5b5ae; }
 .turn-question { background: #eef3ef; }
 .turn-answer { justify-self: end; background: #e2eee8; }
 .turn-control { justify-self: center; color: #526763; font-size: .875rem; }

@@ -69,9 +69,15 @@ export function InterviewScreen({ id, onSessionExpired }: { id: string; onSessio
   }, [refresh]);
   useEffect(() => {
     if (!processing || busy) return;
-    const timer = window.setTimeout(() => void refresh(), 900);
-    return () => window.clearTimeout(timer);
-  }, [processing, busy, session, loadError, refresh]);
+    let stopped = false;
+    let timer: number;
+    const poll = async () => {
+      await refresh();
+      if (!stopped) timer = window.setTimeout(poll, 900);
+    };
+    timer = window.setTimeout(poll, 900);
+    return () => { stopped = true; window.clearTimeout(timer); };
+  }, [processing, busy, refresh]);
 
   const currentQuestion = session?.messages.find(message => message.id === session.current_question_id);
   const draft = session?.messages.find(message =>
@@ -162,6 +168,11 @@ export function InterviewScreen({ id, onSessionExpired }: { id: string; onSessio
           <li key={message.id} className={`turn turn-${message.kind}`}>
             {message.kind !== 'control' && <strong>{message.kind === 'question' ? 'Modeus' : 'Вы'}</strong>}
             <p>{message.text}</p>
+            {message.vacancy_quote && <details className="question-source">
+              <summary>Источник уточнения</summary>
+              <blockquote>{message.vacancy_quote.quote}</blockquote>
+              <a href={message.vacancy_quote.url} target="_blank" rel="noreferrer">{message.vacancy_quote.title}</a>
+            </details>}
             {message.assessment === 'unclear' && <small>Нужно уточнение</small>}
             {message.assessment === 'unrelated' && <small>Связь с рабочим случаем неясна</small>}
           </li>)}

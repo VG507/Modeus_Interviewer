@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { api, ApiError, commandKeys, describe, type Interview, type Page } from './api';
+import { api, ApiError, commandKeys, describe, type Interview, type Page, type ProjectContext } from './api';
 
 const statusLabels = {
   active: 'В процессе',
@@ -8,6 +8,10 @@ const statusLabels = {
 };
 
 const dateFormat = new Intl.DateTimeFormat('ru', { dateStyle: 'medium', timeStyle: 'short' });
+const projectFields: [keyof ProjectContext, string][] = [
+  ['task', 'Задача проекта'], ['period', 'Период'], ['role', 'Ваша роль в проекте'],
+  ['responsibility', 'За что вы отвечали'], ['stack', 'Стек'], ['constraints', 'Ограничения'],
+];
 
 export function InterviewHome({ onOpen, onSessionExpired }: {
   onOpen: (id: string) => void; onSessionExpired: () => void;
@@ -16,6 +20,7 @@ export function InterviewHome({ onOpen, onSessionExpired }: {
   const [loadError, setLoadError] = useState('');
   const [actionError, setActionError] = useState('');
   const [attempt, retry] = useState(0);
+  const [projectCount, setProjectCount] = useState(1);
   const [busy, setBusy] = useState<'create' | 'more'>();
   const execute = useRef(commandKeys());
   const lock = useRef(false);
@@ -60,10 +65,22 @@ export function InterviewHome({ onOpen, onSessionExpired }: {
       setActionError('Укажите вашу роль.');
       return;
     }
+    const projects: ProjectContext[] = [];
+    for (let index = 0; index < projectCount; index++) {
+      const field = (name: keyof ProjectContext) => value(`project-${index}-${name}`);
+      const project = { task: field('task'), period: field('period'), role: field('role'),
+        responsibility: field('responsibility'), stack: field('stack'), constraints: field('constraints') };
+      if (!Object.values(project).some(Boolean)) continue;
+      if (!project.task) {
+        setActionError(`Укажите задачу проекта ${index + 1}.`);
+        return;
+      }
+      projects.push(project);
+    }
     void run('create', async () => {
       const created = await execute.current<Interview>('/interviews', {
         context: { role: value('role'), experience: value('experience'),
-          responsibilities: value('responsibilities'), conditions: value('conditions') },
+          responsibilities: value('responsibilities'), conditions: value('conditions'), projects },
       });
       onOpen(created.id);
     });
@@ -97,6 +114,20 @@ export function InterviewHome({ onOpen, onSessionExpired }: {
         <textarea id="responsibilities" name="responsibilities" rows={2} maxLength={1000}/>
         <label htmlFor="conditions">В каком контексте вы работаете <span>необязательно</span></label>
         <textarea id="conditions" name="conditions" rows={2} maxLength={1000}/>
+        <details className="interview-projects">
+          <summary>Проекты <span>необязательно</span></summary>
+          {Array.from({ length: projectCount }, (_, index) =>
+            <fieldset key={index}>
+              <legend>Проект {index + 1}</legend>
+              {projectFields.map(([name, label]) => {
+                const id = `project-${index}-${name}`;
+                return <div key={name}><label htmlFor={id}>{label}</label><input id={id} name={id} maxLength={300}/></div>;
+              })}
+            </fieldset>)}
+          {projectCount < 3 && <button className="secondary" type="button" onClick={() => setProjectCount(n => n + 1)}>
+            Добавить проект
+          </button>}
+        </details>
         <button>{busy === 'create' ? 'Создаём…' : 'Начать интервью'}</button>
       </fieldset>
     </form>

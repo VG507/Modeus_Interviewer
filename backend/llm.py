@@ -35,10 +35,10 @@ async def structured_completion(settings: Settings, name: str, schema: dict,
 
 async def check_llm(settings: Settings):
     """Check the configured provider with a real structured request."""
-    schema = {"type": "object", "properties": {"ok": {"type": "boolean"}},
+    schema = {"type": "object", "properties": {"ok": {"type": "boolean", "enum": [True]}},
               "required": ["ok"], "additionalProperties": False}
     result = await structured_completion(
-        settings, "connection_check", schema, "Return the JSON object with ok set to true.", {},
+        settings, "connection_check", schema, "Return the user's JSON object exactly as given.", {"ok": True},
     )
     if not isinstance(result, dict) or set(result) != {"ok"} or result["ok"] is not True:
         raise RuntimeError("LLM_SCHEMA_CHECK_FAILED")

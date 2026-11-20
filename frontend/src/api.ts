@@ -1,10 +1,16 @@
 export type Topic = { id: string; profession_id: string; title: string };
-export type Context = { role: string; experience: string; responsibilities: string; conditions: string };
+export type ProjectContext = {
+  task: string; period: string; role: string; responsibility: string; stack: string; constraints: string;
+};
+export type Context = {
+  role: string; experience: string; responsibilities: string; conditions: string; projects?: ProjectContext[];
+};
 export type Message = {
   id: string; kind: 'question' | 'answer' | 'control'; text: string | null;
   reply_to_question_id: string | null;
   status: 'draft' | 'queued' | 'processing' | 'processed' | 'failed';
   assessment?: 'relevant' | 'unclear' | 'unrelated' | 'declined' | null;
+  vacancy_quote?: { title: string; url: string; quote: string } | null;
 };
 export type Interview = {
   id: string; topic_id: string; context: Context; version: number; updated_at: string;

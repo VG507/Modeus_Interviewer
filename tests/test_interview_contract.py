@@ -1,6 +1,9 @@
 import json
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from backend.interview_schemas import (
     AnswerResult,
     CreateAnswer,
@@ -30,3 +33,17 @@ def test_first_turn_examples_match_contract():
     assert next_question.session_id == accepted.interview.id
     assert next_question.sequence == accepted.answer.sequence + 1
     assert conflict.error.current_version == accepted.interview.version
+
+
+def test_optional_projects_preserve_the_previous_request_shape():
+    original = CreateInterview.model_validate({"context": {"role": "QA"}})
+    empty = CreateInterview.model_validate({"context": {"role": "QA", "projects": []}})
+    assert original.model_dump() == empty.model_dump()
+    assert "projects" not in original.model_dump()["context"]
+
+    project = {"task": " Проверка оформления заказа ", "stack": "Playwright"}
+    context = {"role": "QA", "projects": [project] * 3}
+    saved = CreateInterview.model_validate({"context": context}).model_dump()["context"]
+    assert [item["task"] for item in saved["projects"]] == ["Проверка оформления заказа"] * 3
+    with pytest.raises(ValidationError):
+        CreateInterview.model_validate({"context": {**context, "projects": [project] * 4}})

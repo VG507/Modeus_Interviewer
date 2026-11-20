@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { api, ApiError, command, describe } from './api';
 import { InterviewHome } from './InterviewHome';
 import { InterviewScreen } from './InterviewScreen';
+import { Vacancies } from './Vacancies';
 import { CardsList, CardScreen, CatalogCard } from './Cards';
 import './style.css';
 
@@ -73,6 +74,7 @@ function App() {
         <a href="#/catalog">Каталог</a>
         {user && <a href="#/cards">Мои карточки</a>}
         {user?.is_editor && <a href="#/review">Редактура</a>}
+        {user?.is_editor && <a href="#/vacancies">Вакансии</a>}
         {!user && (route === '#/catalog' || catalogId) && <a href="#">Войти</a>}
       </nav>
       {user && <div className="account"><span>{user.is_editor ? 'Доступ редактора' : 'Доступ участника'}</span>
@@ -92,6 +94,8 @@ function App() {
         </fieldset>
       </form> : cardId ? <CardScreen key={cardId} id={cardId} user={user} onSessionExpired={expireSession}/> :
       route === '#/cards' ? <CardsList key="own" scope="own" onSessionExpired={expireSession}/> :
+      route === '#/vacancies' ?
+        user.is_editor ? <Vacancies onSessionExpired={expireSession}/> : <p role="alert">Для этого раздела нужна роль редактора.</p> :
       route === '#/review' || route === '#/review/published' ?
         user.is_editor ? <CardsList key={route} scope={route === '#/review' ? 'review' : 'published'}
           onSessionExpired={expireSession}/> : <p role="alert">Для этого раздела нужен доступ редактора.</p> :

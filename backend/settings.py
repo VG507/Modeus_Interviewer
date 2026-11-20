@@ -14,3 +14,9 @@ class Settings(BaseSettings):
     llm_api_key: str = Field(default="", repr=False)
     llm_timeout_seconds: int = Field(default=45, ge=1, le=120)
     llm_reasoning_effort: Literal["", "none", "low", "medium", "high"] = ""
+    hh_user_agent: str = ""
+    hh_access_token: str = Field(default="", repr=False)
+    hh_client_id: str = Field(default="", repr=False)
+    hh_client_secret: str = Field(default="", repr=False)
+    hh_areas: str = "113"
+    hh_weekly_enabled: bool = True

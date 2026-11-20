@@ -2,13 +2,15 @@ import argparse
 import asyncio
 import getpass
 import json
+from pathlib import Path
 
 from sqlalchemy import delete, select
 
-from backend.db import LoginSession, User, database
+from backend.db import LoginSession, User, VacancyCollection, database
 from backend.llm import check_llm
 from backend.security import hash_password
 from backend.settings import Settings
+from backend.vacancy_import import claim_collection, run_collection
 
 
 def main():
@@ -20,6 +22,9 @@ def main():
     reset = sub.add_parser("reset-password", help="Set a new password and revoke existing sessions")
     reset.add_argument("email")
     sub.add_parser("check-llm")
+    collect = sub.add_parser("import-vacancies", help="Refresh HH vacancies for one profile")
+    collect.add_argument("profession_id")
+    collect.add_argument("--file", type=Path, help="Import a JSON array of saved detailed HH responses")
     args = parser.parse_args()
     settings = Settings()
     if args.command == "check-llm":
@@ -29,6 +34,24 @@ def main():
             # No exception body from HTTP clients: URLs may include credentials.
             print(str(exc) if type(exc) is RuntimeError else type(exc).__name__)
             raise SystemExit(1) from None
+        return
+    if args.command == "import-vacancies":
+        engine, sessions = database(settings.database_url)
+        try:
+            with sessions() as db:
+                if not db.scalar(select(VacancyCollection.profession_id).where(
+                    VacancyCollection.profession_id == args.profession_id
+                )):
+                    parser.error("PROFILE_NOT_FOUND")
+            token = claim_collection(sessions, args.profession_id)
+            if token is None:
+                parser.error("HH_ALREADY_RUNNING")
+            result = run_collection(sessions, settings, args.profession_id, token, args.file)
+            print(json.dumps(result, ensure_ascii=False))
+            if result["status"] != "ok":
+                raise SystemExit(1)
+        finally:
+            engine.dispose()
         return
     email = args.email.strip().lower()
     if "@" not in email or len(email) > 254:

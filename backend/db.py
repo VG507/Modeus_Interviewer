@@ -81,6 +81,7 @@ class Message(Base):
     reply_to_question_id: Mapped[str | None] = mapped_column(ForeignKey("interview_messages.id"))
     status: Mapped[str] = mapped_column(String(16))
     extraction: Mapped[dict | None] = mapped_column(JSON)
+    market_sources: Mapped[list | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
 
@@ -127,6 +128,39 @@ class CardEvent(Base):
     content_version: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     details: Mapped[dict] = mapped_column(JSON)
+
+
+class VacancyCollection(Base):
+    __tablename__ = "vacancy_collections"
+    profession_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    title: Mapped[str] = mapped_column(String(120), server_default="")
+    title_key: Mapped[str] = mapped_column(String(360), server_default="", index=True, unique=True)
+    search_query: Mapped[str] = mapped_column(String(500), server_default="")
+    aliases: Mapped[list | None] = mapped_column(JSON(none_as_null=True))
+    approved: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    config_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    cards: Mapped[list] = mapped_column(JSON, default=list)
+    stats: Mapped[dict] = mapped_column(JSON, default=dict)
+    details_cache: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
+    progress: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime)
+    run_id: Mapped[str | None] = mapped_column(String(36))
+    error: Mapped[str | None] = mapped_column(String(64))
+
+
+class HeadHunterRequestWindow(Base):
+    __tablename__ = "hh_request_window"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    last_started_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class VacancySnapshot(Base):
+    __tablename__ = "vacancy_snapshots"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    profession_id: Mapped[str] = mapped_column(ForeignKey("vacancy_collections.profession_id"), index=True)
+    collected_at: Mapped[datetime] = mapped_column(DateTime)
+    stats: Mapped[dict] = mapped_column(JSON)
 
 
 def database(url):

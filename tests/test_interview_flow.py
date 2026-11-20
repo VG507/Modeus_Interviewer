@@ -1,4 +1,6 @@
+import asyncio
 import time
+from threading import Event
 from uuid import uuid4
 
 import httpx
@@ -45,6 +47,7 @@ def test_interview_retries_and_private_draft(tmp_path, monkeypatch):
 
     async def extract_once(settings, question, answer, state):
         assert state["intake"]["role"] == "Backend"
+        assert state["intake"]["projects"][0]["task"] == "Сервис расчёта доставки"
         extraction_calls.append(answer["text"])
         return Evidence(facts=[Candidate(field="task", quote="Медленный отчёт"),
                                Candidate(field="action", quote="добавил индекс")],
@@ -57,7 +60,7 @@ def test_interview_retries_and_private_draft(tmp_path, monkeypatch):
             raise httpx.ReadTimeout("simulated")
         return "Почему вы решили добавить индекс?"
 
-    async def save_card(settings, title, state, messages):
+    async def save_card(settings, title, state):
         return {"title": title, "actions": [state["facts"][1]]}, "Добавлен индекс."
 
     monkeypatch.setattr(interview_worker, "extract", extract_once)
@@ -75,7 +78,9 @@ def test_interview_retries_and_private_draft(tmp_path, monkeypatch):
 
         login("owner@example.test")
         assert client.get("/api/v1/topics").json()["items"][0]["id"] == "sql"
-        created = post("/api/v1/interviews", {"topic_id": "sql", "context": {"role": "Backend"}})
+        created = post("/api/v1/interviews", {"topic_id": "sql", "context": {
+            "role": "Backend", "projects": [{"task": "Сервис расчёта доставки"}],
+        }})
         assert created.status_code == 201, created.text
         path = f'/api/v1/interviews/{created.json()["id"]}'
         state = wait_for(client, path, "idle")
@@ -125,6 +130,7 @@ def test_interview_retries_and_private_draft(tmp_path, monkeypatch):
         card = client.get(card_path).json()
         assert card["publication_status"] == "draft"
         assert card["content"]["actions"][0]["supporting_message_ids"] == [draft["answer"]["id"]]
+        assert "Сервис расчёта доставки" not in card["text"]
         assert len(client.get("/api/v1/cards").json()["items"]) == 1
 
         async def full_case(settings, question, answer, state):
@@ -153,12 +159,16 @@ def test_interview_retries_and_private_draft(tmp_path, monkeypatch):
         worker_answer, after_worker = submit_complete_case("Подробный случай фоновой задачи", "Сбой фоновой задачи")
         assert after_worker["status"] == "active" and after_worker["card_id"] is None
         assert after_worker["current_topic_title"] == "SQL"
+        expected_cases = [("SQL", sql_answer), ("Сбой фоновой задачи", worker_answer)]
+        for index in range(3, 9):
+            title = "SQL" if index % 2 else "Сбой фоновой задачи"
+            answer_id, after_worker = submit_complete_case(f"Подробный случай {index}", title)
+            expected_cases.append((title, answer_id))
         assert post(continuing + "/finish", {"expected_version": after_worker["version"]}).status_code == 202
         continued_card_id = wait_for(client, continuing, "idle")["card_id"]
         cases = client.get(f"/api/v1/cards/{continued_card_id}").json()["content"]["cases"]
-        assert [case["title"] for case in cases] == ["SQL", "Сбой фоновой задачи"]
-        assert [case["actions"][0]["supporting_message_ids"] for case in cases] == [
-            [sql_answer], [worker_answer],
+        assert [(case["title"], case["actions"][0]["supporting_message_ids"]) for case in cases] == [
+            (title, [answer_id]) for title, answer_id in expected_cases
         ]
 
         async def discover(settings, question, answer, state):
@@ -188,3 +198,79 @@ def test_interview_retries_and_private_draft(tmp_path, monkeypatch):
         login("other@example.test")
         assert client.get(path).status_code == client.get(card_path).status_code == 404
         assert client.get("/api/v1/cards").json()["items"] == []
+
+
+def test_finish_while_extraction_runs_keeps_submitted_answer_once(tmp_path, monkeypatch):
+    url = f"sqlite:///{(tmp_path / 'finish.db').as_posix()}"
+    monkeypatch.setenv("DATABASE_URL", url)
+    command.upgrade(Config("alembic.ini"), "head")
+    app = create_app(Settings(database_url=url, app_origin=ORIGIN))
+    with app.state.sessions.begin() as db:
+        db.add(User(email="owner@example.test", password_hash=hash_password("test-password-123")))
+
+    started = Event()
+    release = Event()
+    calls = []
+    reply = "После релиза тесты оформления заказов перестали проходить."
+
+    async def extract(settings, question, answer, state):
+        calls.append(answer["id"])
+        if len(calls) == 1:
+            started.set()
+            while not release.is_set():
+                await asyncio.sleep(0.01)
+            return Evidence(facts=[], ambiguous=[], not_applicable=[], refused=False)
+        if len(calls) == 2:
+            raise httpx.ReadTimeout("simulated")
+        return Evidence(facts=[Candidate(field="task", quote=answer["text"])],
+                        ambiguous=[], not_applicable=[], refused=False, topic_title="Сбой тестов заказов")
+
+    monkeypatch.setattr(interview_worker, "extract", extract)
+    with TestClient(app) as client:
+        assert client.post("/api/v1/auth/login", headers={"Origin": ORIGIN}, json={
+            "email": "owner@example.test", "password": "test-password-123",
+        }).status_code == 200
+
+        def post(url, body, key=None):
+            return client.post(url, headers={"Origin": ORIGIN, "Idempotency-Key": key or str(uuid4())}, json=body)
+
+        session = post("/api/v1/interviews", {"context": {"role": "QA"}}).json()
+        path = f'/api/v1/interviews/{session["id"]}'
+        current = wait_for(client, path, "idle")
+        draft = post(path + "/answers", {
+            "expected_version": current["version"], "question_id": current["current_question_id"], "text": reply,
+        }).json()
+        answer_id = draft["answer"]["id"]
+        assert post(f"{path}/answers/{answer_id}/submit", {
+            "expected_version": draft["interview"]["version"],
+        }).status_code == 202
+        assert started.wait(5)
+        running = wait_for(client, path, "running", "extraction")
+        finish = {"expected_version": running["version"]}
+        try:
+            accepted = post(path + "/finish", finish, "finish")
+            assert accepted.status_code == 202
+        finally:
+            release.set()
+
+        failed = wait_for(client, path, "failed", "synthesis")
+        assert failed["status"] == "completing" and failed["card_id"] is None
+        assert failed["error"]["code"] == "PROCESSING_TIMEOUT"
+        cookies = client.cookies
+
+    resumed = create_app(Settings(database_url=url, app_origin=ORIGIN))
+    client = TestClient(resumed, cookies=cookies)
+    assert post(path + "/retry", {"expected_version": failed["version"]}).status_code == 202
+    wait_for(client, path, "queued", "synthesis")
+    with client:
+        completed = wait_for(client, path, "idle")
+        assert completed["status"] == "completed"
+        assert [message["kind"] for message in completed["messages"]] == ["question", "answer", "control"]
+        assert completed["messages"][1]["status"] == "processed"
+        card = client.get(f'/api/v1/cards/{completed["card_id"]}').json()
+        assert [(fact["text"], fact["supporting_message_ids"]) for fact in card["content"]["task"]] == [
+            (reply, [answer_id]),
+        ]
+        assert post(path + "/finish", finish, "finish").json() == accepted.json()
+        assert len(client.get("/api/v1/cards").json()["items"]) == 1
+        assert calls == [answer_id] * 3

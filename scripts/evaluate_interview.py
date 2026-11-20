@@ -1,4 +1,4 @@
-"""Evaluate the six synthetic SQL scenarios on the configured model."""
+"""Evaluate synthetic SQL scenarios and pilot regressions on the configured model."""
 
 import argparse
 import asyncio
@@ -22,15 +22,26 @@ BASELINE_CHECKS = {
 }
 
 
+def check_facts(content, scenario):
+    violations = []
+    for field, fragments in scenario.get("expected_facts", {}).items():
+        for fragment in fragments:
+            if not any(fragment in fact["text"] for fact in content[field]):
+                violations.append(f"missing evidence in {field}: {fragment}")
+    for field, fragments in scenario.get("forbidden_facts", {}).items():
+        for fragment in fragments:
+            if any(fragment in fact["text"] for fact in content[field]):
+                violations.append(f"misclassified evidence in {field}: {fragment}")
+    return violations
+
+
 async def evaluate(settings, topic, scenario):
     scenario_id = scenario["id"]
     state = CaseState(asked_intents=["get_case"]).model_dump()
     opening = topic["opening_question"]
-    transcript = [{"id": "q1", "kind": "question", "text": opening}]
     if scenario_id in PRIOR_CASES:
         # Seed evidence from a synthetic earlier answer, not from evaluator commentary.
         prior = {"id": "a0", "kind": "answer", "text": "В нашем сервисе медленно строился отчёт."}
-        transcript.append(prior)
         state["facts"] = [{
             "id": "case-fact", "field": "task", "text": prior["text"],
             "supporting_message_ids": [prior["id"]],
@@ -40,9 +51,7 @@ async def evaluate(settings, topic, scenario):
         if scenario_id == "pilot_reason":
             state["asked_intents"].append("decision")
             opening = "Почему вы выбрали именно составной индекс?"
-        transcript.append({"id": "q2", "kind": "question", "text": opening})
     answer = {"id": "a1", "text": scenario["answer"]}
-    transcript.append({**answer, "kind": "answer"})
 
     start = monotonic()
     evidence = await extract(settings, opening, answer, state)
@@ -50,10 +59,8 @@ async def evaluate(settings, topic, scenario):
     intent = choose_intent(state, refused=evidence.refused, needs_rephrase=evidence.needs_rephrase)
     question = await formulate(settings, topic["topic"]["title"], intent, answer, state) if intent else None
     turn_seconds = round(monotonic() - start, 2)
-    if question:
-        transcript.append({"id": "next", "kind": "question", "text": question})
-    content, _ = await synthesize(settings, topic["topic"]["title"], state, transcript)
-    violations = []
+    content, _ = await synthesize(settings, topic["topic"]["title"], state)
+    violations = check_facts(content, scenario)
     if "allowed_intents" in scenario and intent not in scenario["allowed_intents"]:
         violations.append(f"unexpected intent: {intent}")
     for field in scenario.get("required_card_sections", []):
@@ -65,11 +72,22 @@ async def evaluate(settings, topic, scenario):
         item.get("responsibility") == scenario["responsibility"] for item in content["actions"]
     ):
         violations.append("missing action attribution")
-    return {
+    result = {
         "id": scenario_id, "expected": scenario["expected"], "forbidden": scenario["forbidden"],
         "intent": intent, "question": question, "refused": evidence.refused,
         "extraction": extraction, "card": content, "turn_seconds": turn_seconds, "violations": violations,
     }
+    followup = scenario.get("followup")
+    if followup and question and intent == followup["intent"]:
+        reply = {"id": "a2", "text": followup["answer"]}
+        state["asked_intents"].append(intent)
+        model_state = {**state, "recent_history": [{"question": opening, "answer": answer["text"]}]}
+        evidence = await extract(settings, question, reply, model_state)
+        state, extraction = apply_extraction(state, evidence, reply["id"], intent)
+        content, _ = await synthesize(settings, topic["topic"]["title"], state)
+        violations.extend(check_facts(content, followup))
+        result["followup"] = {"answer": reply["text"], "extraction": extraction, "card": content}
+    return result
 
 
 async def run(args):

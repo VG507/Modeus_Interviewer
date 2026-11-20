@@ -13,7 +13,9 @@
     "expected": "Сохранить объяснение в причинах решения.",
     "forbidden": ["Повторно спрашивать причину выбора"],
     "allowed_intents": ["verification", "context", null],
-    "required_card_sections": ["decisions"]
+    "required_card_sections": ["decisions"],
+    "expected_facts": {"decisions": ["Композитный индекс повторяет этот порядок."]},
+    "forbidden_facts": {"actions": ["Композитный индекс повторяет этот порядок."]}
   },
   {
     "id": "team_action",

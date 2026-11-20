@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 Identifier = Annotated[str, StringConstraints(min_length=1, max_length=64)]
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 ContextText = Annotated[str, StringConstraints(strip_whitespace=True, max_length=1000)]
+ProjectText = Annotated[str, StringConstraints(strip_whitespace=True, max_length=300)]
 AnswerText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=8000)]
 FactField = Literal["task", "context", "action", "decision", "verification", "error", "limitation"]
 Responsibility = Literal["personal", "shared", "other", "unknown"]
@@ -19,11 +20,22 @@ class Schema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ProjectContext(Schema):
+    task: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)]
+    period: ProjectText = ""
+    role: ProjectText = ""
+    responsibility: ProjectText = ""
+    stack: ProjectText = ""
+    constraints: ProjectText = ""
+
+
 class InterviewContext(Schema):
     role: ShortText
     experience: ContextText = ""
     responsibilities: ContextText = ""
     conditions: ContextText = ""
+    # Keep the serialized request stable for idempotent replays from older clients.
+    projects: list[ProjectContext] = Field(default_factory=list, max_length=3, exclude_if=lambda projects: not projects)
 
 
 class CreateInterview(Schema):
@@ -114,6 +126,12 @@ class InterviewView(Schema):
     updated_at: datetime
 
 
+class VacancyQuote(Schema):
+    title: str
+    url: str
+    quote: str
+
+
 class MessageView(Schema):
     id: Identifier
     session_id: Identifier
@@ -125,6 +143,7 @@ class MessageView(Schema):
     created_at: datetime
     updated_at: datetime
     assessment: AnswerAssessment | None = None
+    vacancy_quote: VacancyQuote | None = None
 
 
 class InterviewDetail(InterviewView):

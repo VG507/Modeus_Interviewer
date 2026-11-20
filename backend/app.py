@@ -17,6 +17,8 @@ from backend.interview_api import router as interview_router
 from backend.interview_worker import run_worker
 from backend.security import check_password, hash_password, token_hash
 from backend.settings import Settings
+from backend.vacancy_api import router as vacancy_router
+from backend.vacancy_import import configured, schedule_collections
 
 
 class LoginBody(BaseModel):
@@ -31,21 +33,27 @@ def create_app(settings: Settings | None = None):
 
     @asynccontextmanager
     async def lifespan(app):
-        worker = asyncio.create_task(run_worker(sessions, settings))
+        workers = [asyncio.create_task(run_worker(sessions, settings))]
+        if settings.hh_weekly_enabled and configured(settings):
+            workers.append(asyncio.create_task(schedule_collections(sessions, settings)))
         try:
             yield
         finally:
-            worker.cancel()
-            with suppress(asyncio.CancelledError):
-                await worker
+            for worker in workers:
+                worker.cancel()
+            for worker in workers:
+                with suppress(asyncio.CancelledError):
+                    await worker
             engine.dispose()
 
     app = FastAPI(title="Modeus MVP", version="0.1.0", lifespan=lifespan)
     app.state.engine = engine
     app.state.sessions = sessions
+    app.state.settings = settings
     app.state.app_origin = settings.app_origin
     app.include_router(interview_router)
     app.include_router(card_router)
+    app.include_router(vacancy_router)
 
     @app.exception_handler(HTTPException)
     async def error_handler(request, exc):

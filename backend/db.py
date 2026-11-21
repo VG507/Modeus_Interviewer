@@ -1,7 +1,10 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, create_engine, event, false
+from sqlalchemy import (
+    JSON, BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, create_engine, event,
+    false, func, select, text,
+)
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
@@ -327,6 +330,14 @@ class VacancySourceSample(Base):
     snapshot_id: Mapped[str] = mapped_column(ForeignKey("vacancy_snapshots.id"))
 
 
+class LlmResponse(Base):
+    __tablename__ = "llm_responses"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    model: Mapped[str] = mapped_column(String(200))
+    response: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
 def database(url):
     options = {"check_same_thread": False} if url.startswith("sqlite:") else {}
     engine = create_engine(url, connect_args=options, pool_pre_ping=True)
@@ -335,3 +346,47 @@ def database(url):
         def enable_foreign_keys(connection, _):
             connection.execute("PRAGMA foreign_keys=ON")
     return engine, sessionmaker(engine, expire_on_commit=False)
+
+
+COPY_BATCH = 500
+
+
+def revision(connection):
+    return connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
+
+
+def copy_database(source_url, target_url):
+    """Copy every row into a freshly migrated database, parents before children, in one transaction.
+
+    Rows that migrations seeded in the target are replaced by the source's own copies.
+    """
+    source, target = database(source_url)[0], database(target_url)[0]
+    try:
+        with source.connect() as reader, target.begin() as writer:
+            if revision(reader) != revision(writer):
+                raise RuntimeError("DATABASE_REVISION_MISMATCH: run alembic upgrade head on both databases")
+            # A database in use always has a user; a freshly migrated one has only seeded rows.
+            if writer.execute(select(func.count()).select_from(User)).scalar():
+                raise RuntimeError("TARGET_IN_USE: the target database already has users")
+            for table in reversed(Base.metadata.sorted_tables):
+                writer.execute(table.delete())
+            copied = {}
+            for table in Base.metadata.sorted_tables:
+                rows = reader.execute(select(table))
+                copied[table.name] = 0
+                while batch := rows.fetchmany(COPY_BATCH):
+                    writer.execute(table.insert(), [dict(row._mapping) for row in batch])
+                    copied[table.name] += len(batch)
+            if writer.dialect.name == "postgresql":
+                # Copied ids do not move a serial counter; the next insert would reuse id 1.
+                for table in Base.metadata.sorted_tables:
+                    for column in table.primary_key.columns:
+                        if isinstance(column.type, Integer) and column.autoincrement is not False:
+                            writer.execute(text(
+                                f"SELECT setval(pg_get_serial_sequence('{table.name}', '{column.name}'), "
+                                f"COALESCE(MAX({column.name}), 1), MAX({column.name}) IS NOT NULL) FROM {table.name}"
+                            ))
+        return copied
+    finally:
+        source.dispose()
+        target.dispose()

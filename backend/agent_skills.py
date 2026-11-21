@@ -184,6 +184,7 @@ def check_evidence(settings, item, body, profession, task):
             "in first_line and last_line. Use null when a field is absent, including human_check and limitation. "
             "Set relevant to false for unrelated, unsafe, or vague workflows. A proposed workflow does not prove adoption.",
             {"task": task, "profession": profession, "skill": item.title, "numbered_text": numbered_text},
+            parse=SkillEvidence.model_validate,
         ), timeout=min(settings.llm_timeout_seconds, 45))
 
     result = SkillEvidence.model_validate(asyncio.run(extract()))

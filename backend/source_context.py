@@ -155,7 +155,7 @@ def sources_for_followup(db, intake, state, intent, answer_text=""):
             "source_id": excerpt.source_id, "excerpt_id": excerpt.id, "profession_id": profession_id,
             "kind": excerpt.kind, "purpose": excerpt.purpose, "title": excerpt.title, "url": url,
             "task_excerpt": excerpt.quote, "detail": excerpt.detail, "version": excerpt.version,
-            "skills": [canonical_skill(excerpt.technology)] if excerpt.technology else [],
+            "skills": [cs] if excerpt.technology and (cs := canonical_skill(excerpt.technology)) else [],
             **({"provider": provider, "item_id": item_id, "revision_digest": digest} if provider == "skills" else {}),
         }))
     if not matches:

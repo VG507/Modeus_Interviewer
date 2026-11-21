@@ -16,22 +16,8 @@ PROFILES = {
                r"\b(?:devops|devsecops|sre|site reliability|platform engineer|инженер платформ\w*)\b"),
 }
 
-SKILL_ALIASES = {
-    "python": ("python", "пайтон"), "postgresql": ("postgresql", "postgres", "постгрес"),
-    "javascript": ("javascript", "js"), "typescript": ("typescript", "ts"),
-    "node.js": ("node.js", "nodejs"), "react": ("react.js", "reactjs", "react"),
-    "vue": ("vue.js", "vuejs", "vue"), "kubernetes": ("kubernetes", "k8s"),
-    "ci/cd": ("ci/cd", "ci cd", "cicd"),
-    "django": ("django framework", "django"),
-    "django rest framework": ("django rest framework", "drf"),
-    "rest": ("rest api", "restful api", "rest"),
-    **{name: (name,) for name in (
-        "sql", "fastapi", "flask", "redis", "docker", "git", "graphql", "pytest",
-        "selenium", "playwright", "cypress", "postman", "linux", "ansible", "terraform", "helm",
-        "prometheus", "grafana", "nginx", "kafka", "rabbitmq", "celery", "mysql", "angular", "html", "css",
-    )},
-}
-ALIASES = {alias: skill for skill, aliases in SKILL_ALIASES.items() for alias in aliases}
+from backend.textnorm import ALIASES, SKILL_ALIASES, canonical_skill
+
 SKILL_PATTERN = re.compile(
     r"(?<!\w)(?:" + "|".join(re.escape(alias) for alias in sorted(ALIASES, key=len, reverse=True)) + r")(?!\w)",
     re.IGNORECASE,
@@ -96,11 +82,6 @@ def skill_hits(text):
         skill = ALIASES.get(quote.casefold())
         if skill:
             yield skill, quote
-
-
-def canonical_skill(label):
-    label = label.casefold()
-    return ALIASES.get(label, label)
 
 
 def task_key(text):

@@ -32,8 +32,8 @@ from backend.documentation_fetch import TARGETS, release_notes
 
 
 @pytest.fixture
-def sessions(tmp_path, monkeypatch):
-    url = f"sqlite:///{(tmp_path / 'discovery.db').as_posix()}"
+def sessions(database_url, monkeypatch):
+    url = database_url
     monkeypatch.setenv("DATABASE_URL", url)
     monkeypatch.setenv("APP_ORIGIN", "http://localhost:5173")
     monkeypatch.setenv("LLM_BASE_URL", "")
@@ -85,7 +85,7 @@ def test_agent_skill_trace_from_github_to_question_answer_and_card(sessions, mon
     def fragment(line):
         return {"first_line": line, "last_line": line}
 
-    async def analyze(settings, name, schema, instructions, payload):
+    async def analyze(settings, name, schema, instructions, payload, parse=None):
         analyses.append(payload)
         assert f"3: {verification}" in payload["numbered_text"]
         return {"relevant": True, "inputs": fragment(1), "output": fragment(2),
@@ -144,9 +144,7 @@ def test_agent_skill_trace_from_github_to_question_answer_and_card(sessions, mon
         assert sources_for_followup(db, interview.context, state, "verification", verification) == []
         interview_worker.queue(interview, "question", intent="verification", answer_id=first.id)
 
-    async def question_model(settings, schema, instructions, payload):
-        if schema is interview_engine.SummaryOrder:
-            return schema(fact_numbers=[1, 2])
+    async def question_model(settings, schema, instructions, payload, check=None):
         assert payload["market_context"][0]["task_excerpt"] == verification
         assert payload["market_context"][0]["provider"] == "skills"
         return schema(text="Как вы проверяли результат взаимодействия до и после действия?", source_number=1)
@@ -198,7 +196,7 @@ def test_agent_skill_trace_from_github_to_question_answer_and_card(sessions, mon
         assert sources_for_followup(db, {"role": "QA Engineer"}, state, "verification") == []
     invalid_fragment = False
     assert collect()["accepted"] == 1
-    async def change_skill_during_generation(settings, schema, instructions, payload):
+    async def change_skill_during_generation(settings, schema, instructions, payload, check=None):
         with sessions.begin() as db:
             candidate = db.get(DiscoveryCandidate, (trace["item_id"], "qa"))
             candidate.valid_until = now() - timedelta(seconds=1)
@@ -273,7 +271,7 @@ def test_only_current_published_card_gaps_reach_question_and_unpublish_invalidat
     model_contexts = []
     unpublish = False
 
-    async def model(settings, schema, instructions, payload):
+    async def model(settings, schema, instructions, payload, check=None):
         model_contexts.append(payload.get("knowledge_gaps"))
         assert "PRIVATE_SENTINEL" not in str(payload)
         if unpublish:
@@ -394,7 +392,7 @@ def test_openalex_admits_grounded_research_and_removes_it_on_crossref_notice(ses
             {"type": "doi", "id": doi}, {"type": "eissn", "id": "1111-1111"},
         ]}}]})
 
-    async def model(settings, name, schema, instructions, payload):
+    async def model(settings, name, schema, instructions, payload, parse=None):
         assert payload["sections"]["method"][0]["heading"] == "Methodology"
         return {"relevant": True, "task": "flaky test detection", "quote": result,
                 "detail": "19 additional failures", "method": method, "sample": sample,
@@ -701,7 +699,7 @@ def test_automatic_check_retries_verifies_provenance_and_invalidates_old_excerpt
     }
     available = False
 
-    async def model(_, __, ___, ____, payload):
+    async def model(_, __, ___, ____, payload, parse=None):
         assert set(payload["fragments"]) == {"body", "comment:20"}
         if not available:
             raise TimeoutError()

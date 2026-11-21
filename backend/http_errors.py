@@ -30,6 +30,7 @@ MESSAGES = {
     "HH_ALREADY_RUNNING": "Сбор вакансий уже выполняется.",
     "HH_NOT_CONFIGURED": "Сбор вакансий не настроен.",
     "IDEMPOTENCY_CONFLICT": "Ключ запроса уже использован с другими данными.",
+    "INJECTION_DETECTED": "В анкете есть команды для бота. Опишите свою работу обычным текстом.",
     "INTERNAL_SERVER_ERROR": "Внутренняя ошибка сервера.",
     "INTERVIEW_NOT_FOUND": "Интервью не найдено.",
     "INVALID_CREDENTIALS": "Проверьте почту и пароль.",

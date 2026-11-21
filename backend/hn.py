@@ -107,11 +107,12 @@ def profile_terms(db, profession, additional, stamp):
         id_ = profile.profession_id
         terms = set(PROFILE_TECHNOLOGIES.get(id_, ()))
         if profile.approved:
-            mentions = Counter(skill for cards, _ in fresh_vacancy_samples(profile, samples.get(id_), stamp) for card in cards
-                               for skill in {canonical_skill(skill) for skill in card.get("skills", [])})
+            mentions = Counter(skill for cards, _ in fresh_vacancy_samples(profile, samples.get(id_), stamp)
+                               for card in cards
+                               for skill in set(filter(None, map(canonical_skill, card.get("skills", [])))))
             terms.update(skill for skill, count in mentions.items() if count >= 2)
         if id_ == profession:
-            terms.update(canonical_skill(term.strip()) for term in additional if term.strip())
+            terms.update(cs for term in additional if term.strip() and (cs := canonical_skill(term.strip())))
         if terms:
             result[id_] = sorted(terms)
     if profession and profession not in result:

@@ -14,13 +14,15 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from backend.auth import current_user
 from backend.db import CommandReceipt, InterviewSession, KnowledgeCard, Message, Topic, User
+from backend.injection import injection_attempt
 from backend.interview_engine import choose_intent
 from backend.interview_schemas import (
     AnswerResult, CaseState, CreateAnswer, CreateInterview, InterviewDetail,
     Identifier, InterviewView, MessageView, OPEN_TOPIC_ID, SourceQuote, TopicSummary, UpdateAnswer, VersionedRequest,
 )
 from backend.interview_worker import (
-    InvalidJob, advance_case, append_message, complete, interview_question, job_answer, job_payload, queue, valid_job,
+    InvalidJob, advance_case, append_message, complete, interview_question, job_answer, job_payload, queue,
+    stop_after_attack, valid_job,
 )
 from backend.pagination import newest_page
 
@@ -188,8 +190,12 @@ def create_interview(request: Request, actor: Actor, key: CommandKey, body: Crea
         ))
         if active >= 5:
             raise HTTPException(409, "ACTIVE_INTERVIEW_LIMIT")
-        interview = InterviewSession(owner_id=actor["id"], topic_id=topic_id,
-                                     context=body.context.model_dump(),
+        context = body.context.model_dump()
+        fields = [value for key, value in context.items() if key != "projects"]
+        fields += [value for project in context.get("projects", []) for value in project.values()]
+        if any(injection_attempt(value) for value in fields if isinstance(value, str)):
+            raise HTTPException(422, "INJECTION_DETECTED")
+        interview = InterviewSession(owner_id=actor["id"], topic_id=topic_id, context=context,
                                      case_state=CaseState(open_interview=topic_id == OPEN_TOPIC_ID).model_dump())
         queue(interview, "initial_question")
         db.add(interview)
@@ -265,6 +271,10 @@ def submit_answer(request: Request, actor: Actor, key: CommandKey, interview_id:
                   answer_id: str, body: VersionedRequest):
     def submit(db, interview):
         answer, current_intent = find_draft(db, interview, answer_id)
+        attack = injection_attempt(answer.text)
+        if attack:
+            stop_after_attack(db, interview, answer, attack)
+            return answer_result(db, interview, answer)
         answer.status = "queued"
         queue(interview, "extraction", answer_id=answer.id,
               current_intent=current_intent)

@@ -90,8 +90,18 @@ async def evaluate(settings, topic, scenario):
     return result
 
 
+def outcome(result):
+    """What a repeated run must reproduce: the facts, the next step and its wording."""
+    if "error" in result:
+        return result["error"]
+    turns = [result, *([result["followup"]] if "followup" in result else [])]
+    return json.dumps([result["intent"], result["question"],
+                       [[(fact["field"], fact["text"]) for fact in turn["extraction"]["facts"]] for turn in turns]],
+                      ensure_ascii=False)
+
+
 async def run(args):
-    settings = Settings()
+    settings = Settings(**({"llm_cache": False} if args.no_cache else {}))
     topic = json.loads((FIXTURES / "sql_topic.json").read_text(encoding="utf-8"))
     scenarios = [
         scenario for name in ("sql_scenarios.json", "pilot_regressions.json")
@@ -101,15 +111,23 @@ async def run(args):
     for scenario in scenarios:
         if args.ids and scenario["id"] not in args.ids:
             continue
-        try:
-            async with asyncio.timeout(3 * settings.llm_timeout_seconds):
-                result = await evaluate(settings, topic, {**BASELINE_CHECKS.get(scenario["id"], {}), **scenario})
-        except Exception as exc:
-            result = {"id": scenario["id"], "error": type(exc).__name__}
+        runs = []
+        for _ in range(args.repeat):
+            try:
+                async with asyncio.timeout(3 * settings.llm_timeout_seconds):
+                    runs.append(await evaluate(settings, topic, {**BASELINE_CHECKS.get(scenario["id"], {}), **scenario}))
+            except Exception as exc:
+                runs.append({"id": scenario["id"], "error": type(exc).__name__})
+        result = runs[0]
+        if args.repeat > 1:
+            result["stable"] = len({outcome(item) for item in runs}) == 1
         results.append(result)
-        print(f'{result["id"]}: {result.get("error") or (result.get("question") or "завершение")}', flush=True)
+        stability = "" if args.repeat == 1 else (" [стабильно]" if result["stable"] else " [РАЗНЫЕ ОТВЕТЫ]")
+        print(f'{result["id"]}: {result.get("error") or (result.get("question") or "завершение")}{stability}', flush=True)
         for violation in result.get("violations", []):
             print(f"  FAIL: {violation}", flush=True)
+    if args.repeat > 1:
+        print(f'Стабильно при {args.repeat} прогонах: {sum(r["stable"] for r in results)} из {len(results)}', flush=True)
     if args.output:
         args.output.write_text(json.dumps(results, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return 1 if not results or any("error" in r or r.get("violations") for r in results) else 0
@@ -119,4 +137,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--ids", nargs="+")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--repeat", type=int, default=1, help="Run each scenario several times and compare the results")
+    parser.add_argument("--no-cache", action="store_true", help="Ask the model every time to measure its own stability")
     raise SystemExit(asyncio.run(run(parser.parse_args())))

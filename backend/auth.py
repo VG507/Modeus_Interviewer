@@ -20,8 +20,9 @@ def limit_login(sessions, request):
                 (LoginWindow.window < window, 1), else_=LoginWindow.attempts + 1,
             )},
             where=or_(LoginWindow.window < window, LoginWindow.attempts < 15),
-        ))
-    if not result.rowcount:
+        ).returning(LoginWindow.client)).first()
+    # RETURNING tells whether the attempt was counted: PostgreSQL reports no rowcount for ORM upserts.
+    if result is None:
         retry_after = LOGIN_WINDOW_SECONDS - stamp % LOGIN_WINDOW_SECONDS
         raise HTTPException(429, "LOGIN_RATE_LIMIT", headers={"Retry-After": str(retry_after)})
 

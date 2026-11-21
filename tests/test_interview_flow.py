@@ -30,8 +30,8 @@ def wait_for(client, path, status, stage=None):
     raise AssertionError(state)
 
 
-def test_worker_continues_after_an_incomplete_job(tmp_path, monkeypatch):
-    url = f"sqlite:///{(tmp_path / 'worker.db').as_posix()}"
+def test_worker_continues_after_an_incomplete_job(database_url, monkeypatch):
+    url = database_url
     monkeypatch.setenv("DATABASE_URL", url)
     command.upgrade(Config("alembic.ini"), "head")
     app = create_app(Settings(database_url=url, app_origin=ORIGIN, documentation_weekly_enabled=False,
@@ -78,8 +78,8 @@ def test_worker_continues_after_an_incomplete_job(tmp_path, monkeypatch):
             assert db.get(Message, without_question.id).status == "failed"
 
 
-def test_invalid_question_state_is_rejected_without_writing(tmp_path, monkeypatch):
-    url = f"sqlite:///{(tmp_path / 'question.db').as_posix()}"
+def test_invalid_question_state_is_rejected_without_writing(database_url, monkeypatch):
+    url = database_url
     monkeypatch.setenv("DATABASE_URL", url)
     command.upgrade(Config("alembic.ini"), "head")
     app = create_app(Settings(database_url=url, app_origin=ORIGIN, hh_weekly_enabled=False,
@@ -132,8 +132,8 @@ def test_invalid_question_state_is_rejected_without_writing(tmp_path, monkeypatc
         assert [message["status"] for message in detail["messages"]] == ["processed", "draft"]
 
 
-def test_interview_retries_and_private_draft(tmp_path, monkeypatch):
-    url = f"sqlite:///{(tmp_path / 'interview.db').as_posix()}"
+def test_interview_retries_and_private_draft(database_url, monkeypatch):
+    url = database_url
     monkeypatch.setenv("DATABASE_URL", url)
     command.upgrade(Config("alembic.ini"), "head")
     app = create_app(Settings(database_url=url, app_origin=ORIGIN))
@@ -303,8 +303,8 @@ def test_interview_retries_and_private_draft(tmp_path, monkeypatch):
         assert client.get("/api/v1/cards").json()["items"] == []
 
 
-def test_finish_while_extraction_runs_keeps_submitted_answer_once(tmp_path, monkeypatch):
-    url = f"sqlite:///{(tmp_path / 'finish.db').as_posix()}"
+def test_finish_while_extraction_runs_keeps_submitted_answer_once(database_url, monkeypatch):
+    url = database_url
     monkeypatch.setenv("DATABASE_URL", url)
     command.upgrade(Config("alembic.ini"), "head")
     app = create_app(Settings(database_url=url, app_origin=ORIGIN))

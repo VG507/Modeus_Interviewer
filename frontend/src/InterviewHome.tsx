@@ -8,6 +8,7 @@ const statusLabels = {
 };
 
 const dateFormat = new Intl.DateTimeFormat('ru', { dateStyle: 'medium', timeStyle: 'short' });
+const previewCount = 6;
 const projectFields: [keyof ProjectContext, string][] = [
   ['task', 'Задача проекта'], ['period', 'Период'], ['role', 'Ваша роль в проекте'],
   ['responsibility', 'За что вы отвечали'], ['stack', 'Стек'], ['constraints', 'Ограничения'],
@@ -21,9 +22,28 @@ export function InterviewHome({ onOpen, onSessionExpired }: {
   const [actionError, setActionError] = useState('');
   const [attempt, retry] = useState(0);
   const [projectCount, setProjectCount] = useState(1);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
   const [busy, setBusy] = useState<'create' | 'more'>();
   const execute = useRef(commandKeys());
   const lock = useRef(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  const clipRef = useRef<HTMLDivElement>(null);
+  const [panelHeight, setPanelHeight] = useState<number>();
+  const [clipped, setClipped] = useState(false);
+
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+    const observer = new ResizeObserver(() => setPanelHeight(form.offsetHeight));
+    observer.observe(form);
+    return () => observer.disconnect();
+  }, [page]);
+
+  useEffect(() => {
+    if (historyExpanded) return;
+    const clip = clipRef.current;
+    setClipped(!!clip && clip.scrollHeight > clip.clientHeight + 1);
+  }, [panelHeight, page, historyExpanded]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -102,7 +122,7 @@ export function InterviewHome({ onOpen, onSessionExpired }: {
   if (!page) return <p role="status">Загружаем интервью…</p>;
 
   return <div className="workspace">
-    <form className="panel" onSubmit={create} aria-labelledby="new-title">
+    <form className="panel" onSubmit={create} aria-labelledby="new-title" ref={formRef}>
       <h2 id="new-title">Новое интервью</h2>
       <p>Расскажите о рабочем случае своими словами. Тема появится из вашего рассказа.</p>
       <fieldset disabled={!!busy}>
@@ -131,18 +151,30 @@ export function InterviewHome({ onOpen, onSessionExpired }: {
         <button>{busy === 'create' ? 'Создаём…' : 'Начать интервью'}</button>
       </fieldset>
     </form>
-    <section className="panel saved" aria-labelledby="saved-title">
+    <section className="panel saved" aria-labelledby="saved-title"
+      style={!historyExpanded && panelHeight ? { maxHeight: panelHeight } : undefined}>
       <h2 id="saved-title">Мои интервью</h2>
-      {page.items.length === 0 ? <p>Сохранённых интервью пока нет.</p>
-        : <ul>{[...page.items].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).map(session =>
-          <li key={session.id}><a href={`#/interviews/${session.id}`}>
-            <strong>{session.current_topic_title ?? 'Интервью'}</strong>
-            <span>{session.context.role} · {statusLabels[session.status]}</span>
-            <time dateTime={session.updated_at}>{dateFormat.format(new Date(session.updated_at))}</time>
-          </a></li>)}</ul>}
-      {page.next_cursor && <button className="secondary" disabled={!!busy} onClick={loadMore}>
-        {busy === 'more' ? 'Загружаем…' : 'Загрузить ещё'}
-      </button>}
+      {(() => {
+        const sorted = [...page.items].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+        const visible = historyExpanded ? sorted : sorted.slice(0, previewCount);
+        const hasMore = sorted.length > visible.length || clipped;
+        return <>
+          {sorted.length === 0 ? <p>Сохранённых интервью пока нет.</p>
+            : <div className="saved-clip" ref={clipRef}><ul>{visible.map(session =>
+              <li key={session.id}><a href={`#/interviews/${session.id}`}>
+                <strong>{session.current_topic_title ?? 'Интервью'}</strong>
+                <span>{session.context.role} · {statusLabels[session.status]}</span>
+                <time dateTime={session.updated_at}>{dateFormat.format(new Date(session.updated_at))}</time>
+              </a></li>)}</ul></div>}
+          {historyExpanded ? <>
+            {page.next_cursor && <button className="secondary" disabled={!!busy} onClick={loadMore}>
+              {busy === 'more' ? 'Загружаем…' : 'Загрузить ещё'}
+            </button>}
+            {hasMore && <button className="quiet" onClick={() => setHistoryExpanded(false)}>Скрыть</button>}
+          </> : hasMore && <button className="secondary"
+            onClick={() => setHistoryExpanded(true)}>Посмотреть больше</button>}
+        </>;
+      })()}
     </section>
     {actionError && <p className="workspace-error" role="alert">{actionError}</p>}
   </div>;

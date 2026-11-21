@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, describe } from './api';
 import { DocumentationReview, DocumentationSettings } from './Documentation';
+import { Vacancies } from './Vacancies';
 
 const searchProviders = { github: 'GitHub Issues', trends: 'GitHub Trends' } as const;
 const providers = { ...searchProviders, docs: 'Официальная документация' } as const;
@@ -179,6 +180,8 @@ export function Discovery({ onSessionExpired }: { onSessionExpired: () => void }
 
   return <section className="stack">
     <h1>Источники</h1>
+    <Vacancies onSessionExpired={onSessionExpired}/>
+    <h2>Материалы из источников</h2>
     <div className="panel vacancy-filters">
       <label>Профессия <select value={profession} disabled={collecting || !profiles?.length} onChange={event => {
         showPage(0); setProfession(event.target.value);
@@ -193,7 +196,7 @@ export function Discovery({ onSessionExpired }: { onSessionExpired: () => void }
         <option value="">Все источники</option>
         {Object.entries(providers).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
       </select></label>
-      <button className="secondary" onClick={() => { showPage(0); setReload(value => value + 1); }}>Обновить</button>
+      <button onClick={() => { showPage(0); setReload(value => value + 1); }}>Обновить</button>
     </div>
     <form className="panel" onSubmit={collectForProfession}>
       <h2>Сбор для выбранной профессии</h2>

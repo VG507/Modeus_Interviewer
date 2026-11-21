@@ -3,9 +3,9 @@ import { createRoot } from 'react-dom/client';
 import { api, ApiError, command, describe } from './api';
 import { InterviewHome } from './InterviewHome';
 import { InterviewScreen } from './InterviewScreen';
-import { Vacancies } from './Vacancies';
 import { Discovery } from './Discovery';
 import { CardsList, CardScreen, CatalogCard } from './Cards';
+import { ThemeToggle } from './ThemeToggle';
 import './style.css';
 
 type User = { id: string; is_editor: boolean };
@@ -70,17 +70,20 @@ function App() {
 
   return <main>
     <header className="masthead">
-      <a className="brand" href="#" aria-label="Modeus, мои интервью">MODEUS</a>
+      <span className="brand">modeus</span>
       <nav className="actions" aria-label="Разделы Modeus">
+        <a href="#">Интервью</a>
         <a href="#/catalog">Каталог</a>
         {user && <a href="#/cards">Мои карточки</a>}
         {user?.is_editor && <a href="#/review">Редактура</a>}
-        {user?.is_editor && <a href="#/vacancies">Вакансии</a>}
         {user?.is_editor && <a href="#/discovery">Источники</a>}
         {!user && (route === '#/catalog' || catalogId) && <a href="#">Войти</a>}
       </nav>
-      {user && <div className="account"><span>{user.is_editor ? 'Доступ редактора' : 'Доступ участника'}</span>
-        <button className="quiet" disabled={busy} onClick={logout}>Выйти</button></div>}
+      <div className="masthead-side">
+        {user && <div className="account"><span>{user.is_editor ? 'Доступ редактора' : 'Доступ участника'}</span>
+          <button className="quiet" disabled={busy} onClick={logout}>Выйти</button></div>}
+        <ThemeToggle/>
+      </div>
     </header>
     {catalogId ? <CatalogCard key={catalogId} id={catalogId}/> : route === '#/catalog' ?
       <CardsList key="catalog" scope="catalog" onSessionExpired={expireSession}/> :
@@ -96,8 +99,6 @@ function App() {
         </fieldset>
       </form> : cardId ? <CardScreen key={cardId} id={cardId} user={user} onSessionExpired={expireSession}/> :
       route === '#/cards' ? <CardsList key="own" scope="own" onSessionExpired={expireSession}/> :
-      route === '#/vacancies' ?
-        user.is_editor ? <Vacancies onSessionExpired={expireSession}/> : <p role="alert">Для этого раздела нужна роль редактора.</p> :
       route === '#/discovery' ?
         user.is_editor ? <Discovery onSessionExpired={expireSession}/> : <p role="alert">Для этого раздела нужна роль редактора.</p> :
       route === '#/review' || route === '#/review/published' ?

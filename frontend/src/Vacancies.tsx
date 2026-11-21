@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError, describe } from './api';
+import { SearchField } from './SearchField';
 
 const experiences = {
   noExperience: 'Без опыта', between1And3: '1–3 года', between3And6: '3–6 лет', moreThan6: 'Более 6 лет',
@@ -208,7 +209,6 @@ export function Vacancies({ onSessionExpired }: { onSessionExpired: () => void }
   }
 
   return <div className="stack">
-    <h1>Вакансии</h1>
     {connectionError && <p role="alert">{connectionError} {overview && 'Показаны последние полученные данные.'}</p>}
     {overview ? <section className="panel" aria-label="Профили вакансий">
       <h2>Профили <span className="market-muted">{overview.profiles.length}</span></h2>
@@ -241,9 +241,8 @@ export function Vacancies({ onSessionExpired }: { onSessionExpired: () => void }
         <label htmlFor="profession-title">Название профессии</label>
         <input id="profession-title" required maxLength={120} value={draft.title}
           onChange={event => setDraft({ ...draft, title: event.target.value })}/>
-        <label htmlFor="profession-query">Поисковый запрос HH</label>
-        <input id="profession-query" required maxLength={500} value={draft.search_query}
-          onChange={event => setDraft({ ...draft, search_query: event.target.value })}/>
+        <SearchField id="profession-query" label="Поисковый запрос HH" required maxLength={500}
+          value={draft.search_query} onChange={value => setDraft({ ...draft, search_query: value })}/>
         <label htmlFor="profession-aliases">Синонимы роли и названия вакансии <span>по одному на строку</span></label>
         <textarea id="profession-aliases" rows={3} maxLength={1936} value={draft.aliases}
           onChange={event => setDraft({ ...draft, aliases: event.target.value })}/>

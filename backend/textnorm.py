@@ -9,8 +9,6 @@ import re
 import unicodedata
 from functools import lru_cache
 
-from rapidfuzz import fuzz, process
-
 SKILL_ALIASES = {
     "python": ("python", "python3", "py3", "пайтон", "питон"),
     "postgresql": ("postgresql", "postgres", "postgres db", "postgre", "psql", "постгрес", "постгрескл"),
@@ -46,7 +44,7 @@ BLACKLIST = frozenset({
     "удаленная работа", "удалённая работа", "гибкий график", "дмс",
 })
 
-FUZZY_THRESHOLD = 90
+FUZZY_THRESHOLD = 0.90
 FUZZY_MIN_LENGTH = 4
 
 # Cyrillic look-alikes inside Latin tokens ("pуthon" -> "python").
@@ -72,6 +70,31 @@ def clean_key(value):
     return SPACES.sub(" ", " ".join(fix_homoglyphs(token) for token in text.split())).strip()
 
 
+def indel_similarity(left, right):
+    """Return normalized insertion/deletion similarity using the longest common subsequence."""
+    row = [0] * (len(right) + 1)
+    for left_char in left:
+        diagonal = 0
+        for index, right_char in enumerate(right, 1):
+            previous = row[index]
+            row[index] = diagonal + 1 if left_char == right_char else max(previous, row[index - 1])
+            diagonal = previous
+    return 2 * row[-1] / (len(left) + len(right))
+
+
+def fuzzy_skill(key):
+    best_score = 0.0
+    best_skill = None
+    for alias, skill in LABELS.items():
+        maximum_score = 2 * min(len(key), len(alias)) / (len(key) + len(alias))
+        if maximum_score < FUZZY_THRESHOLD or maximum_score <= best_score:
+            continue
+        score = indel_similarity(key, alias)
+        if score >= FUZZY_THRESHOLD and score > best_score:
+            best_score, best_skill = score, skill
+    return best_skill
+
+
 @lru_cache(maxsize=8192)
 def canonical_skill(label):
     """Canonical skill name, or None for blacklisted garbage.
@@ -89,7 +112,5 @@ def canonical_skill(label):
         if skill:
             return skill
     if len(key) >= FUZZY_MIN_LENGTH:
-        match = process.extractOne(key, LABELS.keys(), scorer=fuzz.ratio, score_cutoff=FUZZY_THRESHOLD)
-        if match:
-            return LABELS[match[0]]
+        return fuzzy_skill(key) or key
     return key

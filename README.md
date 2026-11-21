@@ -2,9 +2,7 @@
 
 Основа MVP использует FastAPI, SQLAlchemy/Alembic и React/TypeScript/Vite. В браузере можно пройти интервью о рабочем случае, отредактировать карточку и отправить её редактору. После согласия автора и одобрения редактора карточка появляется в публичном каталоге. Тема появляется по ходу разговора.
 
-Порядок работ: [короткий план](Modeus_MVP_Short_Implementation_Plan.md). Интерфейсы и ответственность: [технический контракт](Modeus_MVP_Technical_Contract.md). Итоги аудита: [шаг 1](docs/Step_1_Audit.md).
-
-Тема, анкета, сценарии и схемы первого хода собраны в [материалах шага 2](docs/Step_2_Interview.md). Запуск и проверка диалога и приватного черновика через API описаны в [шаге 3](docs/Step_3_Interview_Core.md).
+[Технический контракт](Modeus_MVP_Technical_Contract.md) и [схема работы интервью](Modeus_Interview_Dataflow.md).
 
 ## Локальный запуск (PowerShell, из корня проекта)
 
@@ -224,4 +222,4 @@ Windows: `winget install PostgreSQL.PostgreSQL.18`, затем те же три 
 $env:TEST_DATABASE_URL="postgresql+psycopg://modeus:modeus@localhost/postgres"; .venv/Scripts/python.exe -m pytest -q
 ```
 
-Текущая вершина миграций — `0020`. Хранение описано в `backend/db.py`, вход — в `backend/auth.py` и `backend/security.py`. За цикл интервью отвечают `backend/interview_api.py`, `backend/interview_worker.py` и `backend/interview_engine.py`. Публикация и каталог находятся в `backend/card_api.py`, Telegram-бот — в `backend/telegram_bot.py`, код web — в `frontend/src`.
+Текущая вершина миграций — `0021`. Хранение описано в `backend/db.py`, вход — в `backend/auth.py` и `backend/security.py`. За цикл интервью отвечают `backend/interview_api.py`, `backend/interview_worker.py` и `backend/interview_engine.py`. Публикация и каталог находятся в `backend/card_api.py`, Telegram-бот — в `backend/telegram_bot.py`, код web — в `frontend/src`.

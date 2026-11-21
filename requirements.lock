@@ -25,7 +25,6 @@ pygments==2.21.0
 pytest==9.2.0
 python-dotenv==1.2.4
 pyyaml==6.0.3
-rapidfuzz==3.14.6
 socksio==1.0.0
 sqlalchemy==2.1.9
 starlette==1.10.0

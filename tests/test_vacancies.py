@@ -32,6 +32,28 @@ def vacancy(vacancy_id="123", **overrides):
     }
 
 
+def test_hh_lease_is_renewed_by_progress_and_expired_runs_can_be_reclaimed(tmp_path, monkeypatch):
+    url = f"sqlite:///{(tmp_path / 'leases.db').as_posix()}"
+    monkeypatch.setenv("DATABASE_URL", url)
+    command.upgrade(Config("alembic.ini"), "head")
+    engine, sessions = database(url)
+    stamp = now()
+    monkeypatch.setattr(vacancy_import, "now", lambda: stamp)
+    profession = "python_backend"
+    token = claim_collection(sessions, profession)
+    progress = vacancy_import.CollectionProgress(sessions, profession, token)
+    stamp += timedelta(minutes=4)
+    progress.report("search")
+    stamp += timedelta(minutes=2)
+    assert claim_collection(sessions, profession) is None
+    stamp += timedelta(minutes=4)
+    new_token = claim_collection(sessions, profession)
+    assert new_token and new_token != token
+    with pytest.raises(vacancy_import.ImportFailure, match="HH_TIMEOUT"):
+        progress.report("details")
+    engine.dispose()
+
+
 def test_hh_pagination_details_and_normalization(monkeypatch):
     requests = []
 
@@ -309,7 +331,9 @@ def test_latest_vacancy_sample_reaches_question_but_not_card(tmp_path, monkeypat
     refresh([vacancy(archived=True)], "failed")
     with sessions.begin() as db:
         collection = db.get(VacancyCollection, "python_backend")
-        assert db.scalar(select(func.count()).select_from(VacancySnapshot)) == 2
+        snapshots = list(db.scalars(select(VacancySnapshot).order_by(VacancySnapshot.collected_at)))
+        assert len(snapshots) == 2
+        assert all(snapshot.cards for snapshot in snapshots)
         assert len(collection.cards) == 1 and "обновлено" in collection.cards[0]["title"]
         assert collection.error == "HH_EMPTY_SAMPLE"
         db.add_all([User(email=f"{role}@example.test", password_hash=hash_password("test-password-123"),

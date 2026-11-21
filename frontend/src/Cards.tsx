@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, commandKeys, describe } from './api';
-import type { Card, CardContent, CardDetail, CardGap, Page, PublicCard, PublicSummary } from './api';
+import type { Card, CardContent, CardDetail, CardEvidence, CardFact, CardGap, Page, PublicCard, PublicSummary } from './api';
 
 type User = { id: string; is_editor: boolean };
 type SessionProps = { onSessionExpired: () => void };
@@ -158,19 +158,83 @@ function CardGaps({ content }: { content: CardContent }) {
   </>;
 }
 
-function Facts({ content }: { content: CardContent }) {
+function Evidence({ path, version, onSessionExpired }: { path: string; version: number; onSessionExpired: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [result, setResult] = useState<CardEvidence>();
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (!open) return;
+    const controller = new AbortController();
+    setResult(undefined);
+    setError('');
+    api<CardEvidence>(path, { signal: controller.signal }).then(value => {
+      if (!controller.signal.aborted) setResult(value);
+    }).catch(problem => {
+      if (controller.signal.aborted) return;
+      if (problem instanceof ApiError && problem.status === 401) onSessionExpired();
+      else setError(describe(problem));
+    });
+    return () => controller.abort();
+  }, [path, version, open, onSessionExpired]);
+  return <details onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary>Доказательства</summary>
+    {error ? <p role="alert">{error}</p> : !result ? <p role="status">Загружаем доказательства…</p> : <>
+      {result.original_text && <p><strong>Исходная формулировка</strong> {result.original_text}</p>}
+      {!!result.skills.length && <p>Подтверждённые навыки · {result.skills.join(', ')}</p>}
+      {!result.turns.length && <p>Для этой формулировки нет подтверждённой связи с ответом.</p>}
+      {result.turns.map((turn, index) => <div key={index}>
+        <p><strong>Вопрос</strong> {turn.question}</p>
+        <p><strong>Цитата из ответа</strong> {turn.answer_quote}</p>
+        {turn.source && <><p><a href={turn.source.url} target="_blank" rel="noreferrer">{turn.source.title}</a></p>
+          <blockquote>{turn.source.quote}</blockquote></>}
+      </div>)}
+    </>}
+  </details>;
+}
+
+type FactTools = { path: string; version: number; onSessionExpired: () => void };
+
+function Facts({ content, evidence, onEdit }: {
+  content: CardContent; evidence?: FactTools; onEdit?: (fact: CardFact) => void;
+}) {
   return <>
     {Object.entries(sections).map(([key, label]) => {
       const facts = content[key as keyof typeof sections];
       return facts?.length ? <div key={key}><strong>{label}</strong>
-        <ul>{facts.map((fact, index) => <li key={index}>{fact.text}</li>)}</ul>
+        <ul>{facts.map((fact, index) => <li key={fact.id ?? index}>
+          {fact.text}
+          {!!fact.skills?.length && <p className="meta">{fact.skills.join(', ')}</p>}
+          {fact.derived_from_fact_id && <p className="meta">Правка автора, связанная с исходным фактом</p>}
+          {fact.id && evidence && <Evidence {...evidence} path={`${evidence.path}/facts/${encodeURIComponent(fact.id)}/evidence`}/>}
+          {fact.id && onEdit && <button type="button" className="quiet" onClick={() => onEdit(fact)}>Исправить факт</button>}
+        </li>)}</ul>
       </div> : null;
     })}
     <CardGaps content={{ title: content.title, unknown_fields: content.unknown_fields }}/>
     {content.cases?.map((item, index) => <section key={index}>
-      <h3>{item.title}</h3><Facts content={item}/>
+      <h3>{item.title}</h3><Facts content={item} evidence={evidence} onEdit={onEdit}/>
     </section>)}
   </>;
+}
+
+function editFact(content: CardContent, target: string, text: string): CardContent {
+  const edited: CardContent = { ...content };
+  for (const section of Object.keys(sections) as (keyof typeof sections)[]) {
+    edited[section] = content[section]?.map(fact => fact.id === target ? { id: target, text } : fact);
+  }
+  if (content.cases) edited.cases = content.cases.map(item => editFact(item, target, text));
+  return edited;
+}
+
+function structuredText(content: CardContent): string {
+  const paragraphs = [content.title];
+  for (const section of Object.keys(sections) as (keyof typeof sections)[]) {
+    const facts = content[section];
+    if (facts?.length) paragraphs.push(sections[section] + '\n' + facts.map(fact => `• ${fact.text}`).join('\n'));
+  }
+  if (content.unknown_fields?.length) paragraphs.push('Что осталось невыясненным: ' +
+    content.unknown_fields.map(field => gapLabels[field]).join(', '));
+  return [...paragraphs, ...(content.cases ?? []).map(structuredText)].join('\n\n');
 }
 
 export function CardScreen({ id, user, onSessionExpired }: SessionProps & { id: string; user: User }) {
@@ -182,6 +246,8 @@ export function CardScreen({ id, user, onSessionExpired }: SessionProps & { id: 
   const [showAuthor, setShowAuthor] = useState(false);
   const [author, setAuthor] = useState('');
   const [consent, setConsent] = useState(false);
+  const [shareEvidence, setShareEvidence] = useState(false);
+  const [factEdit, setFactEdit] = useState<CardFact & { originalText: string }>();
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -198,6 +264,8 @@ export function CardScreen({ id, user, onSessionExpired }: SessionProps & { id: 
     setShowAuthor(data.show_author);
     setAuthor(data.author_name ?? '');
     setConsent(false);
+    setShareEvidence(false);
+    setFactEdit(undefined);
     setComment('');
     setConflict(false);
   }
@@ -249,6 +317,8 @@ export function CardScreen({ id, user, onSessionExpired }: SessionProps & { id: 
   const dirty = title.trim() !== card.content.title || text !== card.text;
   const hasFacts = hasStructuredContent(card.content);
   const disabled = busy || conflict;
+  const evidence = owner || (user.is_editor && (inReview || published) && card.consent?.share_evidence)
+    ? { path, version: card.version, onSessionExpired } : undefined;
 
   function save(event: FormEvent) {
     event.preventDefault();
@@ -257,8 +327,17 @@ export function CardScreen({ id, user, onSessionExpired }: SessionProps & { id: 
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    void action('/submit-review', { consent, show_author: showAuthor, author_name: showAuthor ? author : null },
+    if (card?.review_blocker || dirty) return;
+    void action('/submit-review', { consent, show_author: showAuthor, author_name: showAuthor ? author : null,
+      share_evidence: shareEvidence },
       'Карточка отправлена редактору.');
+  }
+
+  function saveFact(event: FormEvent) {
+    event.preventDefault();
+    if (!card || !factEdit?.id || !factEdit.text.trim() || factEdit.text.trim() === factEdit.originalText || dirty) return;
+    const content = editFact(card.content, factEdit.id, factEdit.text.trim());
+    void action('', { content, text: structuredText(content) }, 'Правка факта сохранена.', 'PATCH');
   }
 
   function review(decision: 'accept' | 'return' | 'keep_private', message: string) {
@@ -287,13 +366,24 @@ export function CardScreen({ id, user, onSessionExpired }: SessionProps & { id: 
             <button disabled={!dirty || !title.trim() || !text.trim()}>Сохранить правки</button>
           </fieldset>
         </form> : <div className="card-text">{card.text}</div>}
-        {user.is_editor && (inReview || published) && <div className="composer">
+        {(owner || (user.is_editor && (inReview || published))) && <div className="composer">
           <p>{card.show_author ? `Отображаемое имя: ${card.author_name}` : 'Публикация без имени автора.'}</p>
-          {hasFacts && <details><summary>Структурированное содержание</summary><Facts content={card.content}/></details>}
+          {hasFacts && <details><summary>Факты и доказательства</summary>
+            <Facts content={card.content} evidence={evidence} onEdit={owner && !published && !dirty && !disabled
+              ? fact => setFactEdit({ ...fact, originalText: fact.text }) : undefined}/>
+          </details>}
+          {factEdit && <form className="composer" onSubmit={saveFact}>
+            <label htmlFor="fact-edit">Формулировка факта</label>
+            <textarea id="fact-edit" value={factEdit.text} required maxLength={8000}
+              onChange={event => setFactEdit({ ...factEdit, text: event.target.value })}/>
+            <div className="actions"><button disabled={disabled || dirty || !factEdit.text.trim() ||
+              factEdit.text.trim() === factEdit.originalText}>Сохранить факт</button>
+              <button type="button" className="secondary" onClick={() => setFactEdit(undefined)}>Отмена</button></div>
+          </form>}
           {!hasFacts && reference && hasStructuredContent(reference) && <details>
             <summary>Факты из предыдущей версии</summary>
             <p>Видны только в редактуре. В каталоге публикуется согласованная версия карточки.</p>
-            <Facts content={reference}/>
+            <Facts content={reference} evidence={owner ? evidence : undefined}/>
           </details>}
         </div>}
       </section>
@@ -303,15 +393,18 @@ export function CardScreen({ id, user, onSessionExpired }: SessionProps & { id: 
         <fieldset disabled={disabled || dirty}>
           <label className="check"><input type="checkbox" checked={consent}
             onChange={event => setConsent(event.target.checked)} required/> Согласен на публикацию этой версии после проверки редактором</label>
+          <label className="check"><input type="checkbox" checked={shareEvidence}
+            onChange={event => setShareEvidence(event.target.checked)}/> Показать редактору вопросы, источники и исходные цитаты к фактам этой версии</label>
           <label className="check"><input type="checkbox" checked={showAuthor}
             onChange={event => setShowAuthor(event.target.checked)}/> Указать имя автора в каталоге</label>
           {showAuthor && <>
             <label htmlFor="card-author">Отображаемое имя или псевдоним</label>
             <input id="card-author" value={author} onChange={event => setAuthor(event.target.value)} required maxLength={120}/>
           </>}
-          <button disabled={!consent || (showAuthor && !author.trim())}>Отправить редактору</button>
+          <button disabled={!!card.review_blocker || !consent || (showAuthor && !author.trim())}>Отправить редактору</button>
         </fieldset>
         {dirty && <p className="feedback">Сначала сохраните правки.</p>}
+        {!dirty && card.review_blocker && <p className="feedback">{card.review_blocker}</p>}
       </form>}
 
       {user.is_editor && (inReview || published) && <section className="panel">

@@ -25,15 +25,22 @@ export type Interview = {
 export type Detail = Interview & { messages: Message[] };
 export type AnswerResult = { interview: Interview; answer: Message };
 export type CardGap = 'task' | 'context' | 'action' | 'decision' | 'verification' | 'error' | 'limitation';
-export type CardContent = { title: string; cases?: CardContent[]; unknown_fields?: CardGap[] } & Partial<Record<
+export type CardFact = { id?: string; text: string; skills?: string[]; derived_from_fact_id?: string };
+export type CardEvidence = {
+  original_text: string | null; skills: string[];
+  turns: { question: string; answer_quote: string; source: Message['source_quote'] }[];
+};
+export type CardContent = { title: string; case_id?: string; cases?: CardContent[]; unknown_fields?: CardGap[] } & Partial<Record<
   'task' | 'context' | 'actions' | 'decisions' | 'verification' | 'errors' | 'limitations',
-  { text: string }[]
+  CardFact[]
 >>;
 export type Card = {
   id: string; session_id: string; owner_id: string; version: number; content_version: number;
   text: string; content: CardContent; show_author: boolean; author_name: string | null;
   publication_status: 'draft' | 'in_review' | 'published';
   review_status: 'unreviewed' | 'needs_changes' | 'reviewed';
+  review_blocker: string | null;
+  consent: { share_evidence?: boolean } | null;
   review: { decision: 'accept' | 'return' | 'keep_private' | 'unpublish'; comment: string } | null;
 };
 export type CardDetail = Card & {
@@ -59,11 +66,13 @@ const messages: Record<string, string> = {
   PAYLOAD_TOO_LARGE: 'Запрос слишком большой. Сократите данные и повторите.',
   CURSOR_INVALID: 'Список изменился. Откройте его заново.',
   INTERNAL_SERVER_ERROR: 'Произошла ошибка на сервере.',
+  API_UNREACHABLE: 'Нет связи с backend Modeus на порту 8000. Проверьте, запущен ли он.',
   UNAUTHENTICATED: 'Сессия закончилась. Войдите снова.',
   INTERVIEW_NOT_FOUND: 'Интервью не найдено или недоступно.',
   TOPIC_NOT_FOUND: 'Тема больше недоступна.',
   CARD_NOT_FOUND: 'Карточка не найдена или недоступна.',
   CARD_UNCHANGED: 'В карточке нет изменений.',
+  COLLECTION_RETRY_UNAVAILABLE: 'Этот этап уже изменился. Обновите состояние сбора.',
   EDITOR_REQUIRED: 'Для этого действия нужен доступ редактора.',
   ORIGIN_REJECTED: 'Откройте Modeus по адресу, заданному в APP_ORIGIN.',
   VALIDATION_ERROR: 'Проверьте заполнение и длину полей.',

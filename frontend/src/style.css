@@ -13,9 +13,12 @@ main { max-width: 980px; margin: 0 auto; padding: 20px 24px 64px; }
 .brand { color: #225e51; letter-spacing: .18em; font-weight: 800; text-decoration: none; }
 .account, .actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .account { color: #4f625e; font-size: .875rem; }
-.masthead nav a, .cards-nav a, .card-link { color: #225e51; }
+.masthead nav a, .cards-nav a, .data-nav a, .card-link { color: #225e51; }
 .cards-nav { margin-bottom: 16px; }
 .cards-nav [aria-current] { font-weight: 700; text-decoration: none; }
+.data-nav { border-bottom: 1px solid #dce3dc; gap: 20px; }
+.data-nav a { padding: 8px 2px; border-bottom: 2px solid transparent; text-decoration: none; }
+.data-nav [aria-current] { border-color: #225e51; font-weight: 700; }
 .card-link { display: inline-block; margin-top: 14px; }
 h1, h2 { line-height: 1.2; overflow-wrap: anywhere; }
 h1 { margin: 0 0 24px; font-size: clamp(1.85rem, 5vw, 2.75rem); letter-spacing: -.035em; }
@@ -31,11 +34,6 @@ p { margin: 0 0 12px; }
 .documentation-option input { width: auto; margin: 0; }
 .documentation-option + .meta { margin: 4px 0 8px; }
 .market-muted { color: #526763; font-weight: 400; }
-.market-profiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
-.market-profile { display: grid; align-content: start; gap: 4px; width: 100%; height: 100%; text-align: left; }
-.market-profile span, .market-profile time { font-size: .85rem; font-weight: 400; }
-.market-profile[aria-pressed="true"] { border-color: #225e51; box-shadow: inset 0 0 0 1px #225e51; }
-.market-profile-actions { margin-top: 16px; }
 .market-progress { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 12px; border-radius: 8px; background: #eef3ef; }
 .market-progress small { color: #526763; }
 .market-spinner { flex: 0 0 18px; width: 18px; height: 18px; border: 2px solid #b7c9c0; border-top-color: #225e51; border-radius: 50%; animation: market-spin .8s linear infinite; }

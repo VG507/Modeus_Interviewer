@@ -3,13 +3,23 @@
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0017"
-down_revision = "0016"
+revision = "0019"
+down_revision = "0018"
 branch_labels = None
 depends_on = None
 
 
 def upgrade():
+    migration = op.get_context()
+    if not migration.as_sql:
+        tables = set(sa.inspect(op.get_bind()).get_table_names())
+        # The standalone Telegram branch also used revision 0017. Alembic
+        # skips the Hacker News migration on databases stamped by that branch.
+        if {"telegram_accounts", "telegram_invites"} <= tables:
+            if "hacker_news_items" not in tables:
+                migration.script.get_revision("0017").module.upgrade()
+            return
+
     op.create_table(
         "telegram_accounts",
         sa.Column("telegram_id", sa.BigInteger(), primary_key=True, autoincrement=False),

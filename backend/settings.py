@@ -22,7 +22,9 @@ class Settings(BaseSettings):
     hh_areas: str = "113"
     hh_weekly_enabled: bool = True
     documentation_weekly_enabled: bool = True
+    hn_collection_enabled: bool = True
     github_token: str = Field(default="", repr=False)
+    openalex_api_key: str = Field(default="", repr=False)
     telegram_bot_token: str = Field(default="", repr=False)
     telegram_api_url: str = "https://api.telegram.org"
     telegram_open_signup: bool = False

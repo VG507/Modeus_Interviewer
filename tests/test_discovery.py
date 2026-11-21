@@ -1,5 +1,6 @@
 import asyncio
 import base64
+from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -10,15 +11,22 @@ from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
-from backend import discovery, documentation, github_evidence
+from backend import agent_skills, discovery, documentation, github_evidence, interview_engine, interview_worker
+from backend import openalex, profession_collection
 from backend import discovery_api
 from backend.app import create_app
 from backend.auth import current_user
-from backend.db import DocumentationRevision, DiscoveryCandidate, DiscoveryItem, RepositoryObservation, SourceExcerpt, database, now
+from backend.db import (
+    DocumentationRevision, DiscoveryCandidate, DiscoveryItem, DiscoveryRevision, RepositoryObservation,
+    InterviewSession, KnowledgeCard, Message, Source, SourceExcerpt, User, VacancyCollection, database, now,
+)
 from backend.discovery_fetch import (
     Collected, CollectionError, ProviderRateLimit, fetch, github_issues, repository_trends,
 )
 from backend.settings import Settings
+from backend.interview_api import message_view
+from backend.interview_schemas import CaseState
+from backend.knowledge import fact_skills, prior_case_context
 from backend.source_context import sources_for_followup
 from backend.documentation_fetch import TARGETS, release_notes
 
@@ -44,6 +52,255 @@ def issue_entry(**fields):
         "created_at": "2026-01-01T00:00:00Z", "closed_at": "2026-06-01T00:00:00Z", "comments": 4,
         **fields,
     }
+
+
+def test_agent_skill_trace_from_github_to_question_answer_and_card(sessions, monkeypatch):
+    target = next(target for target in agent_skills.TARGETS if "webapp-testing" in target.path)
+    monkeypatch.setattr(agent_skills, "TARGETS", (target,))
+    revision = "a" * 40
+    inputs = "Supply the local browser page and a test account."
+    output = "Save screenshots of the rendered interface."
+    verification = "Compare the screenshots before and after the interaction."
+    task = "Проверял поведение веб-приложения в браузере."
+    raw = f"---\nname: webapp-testing\ndescription: Browser checks\n---\n{inputs}\n{output}\n{verification}\n"
+    requested = []
+    analyses = []
+    invalid_fragment = False
+
+    def github(request):
+        requested.append(request.url.path)
+        assert request.url.host == "api.github.com"
+        if request.url.path == f"/repos/{target.repo}":
+            return httpx.Response(200, json={"full_name": target.repo, "private": False, "default_branch": "main"})
+        if request.url.path == f"/repos/{target.repo}/commits/main":
+            return httpx.Response(200, json={"sha": revision})
+        assert request.url.path == f"/repos/{target.repo}/contents/{target.path}"
+        assert request.url.params["ref"] == revision
+        content = raw.encode()
+        return httpx.Response(200, json={
+            "type": "file", "path": target.path, "encoding": "base64", "size": len(content),
+            "content": base64.b64encode(content).decode(),
+        })
+
+    def fragment(line):
+        return {"first_line": line, "last_line": line}
+
+    async def analyze(settings, name, schema, instructions, payload):
+        analyses.append(payload)
+        assert f"3: {verification}" in payload["numbered_text"]
+        return {"relevant": True, "inputs": fragment(1), "output": fragment(2),
+                "verification": fragment(3000 if invalid_fragment else 3), "human_check": None, "limitation": None}
+
+    monkeypatch.setattr(agent_skills, "structured_completion", analyze)
+    settings = Settings(llm_base_url="http://localhost:8001/v1", llm_model="test")
+
+    def collect():
+        return agent_skills.collect_skills(sessions, settings, "qa", transport=httpx.MockTransport(github))
+
+    assert collect() == {"status": "ok", "collected": 1, "accepted": 1}
+    assert len(requested) == 3
+    revision = "b" * 40
+    assert collect()["accepted"] == 1
+    assert len(analyses) == 1
+
+    with sessions.begin() as db:
+        item = db.scalar(select(DiscoveryItem).where(DiscoveryItem.provider == "skills"))
+        first_revision = db.get(DiscoveryRevision, (item.id, item.digest))
+        assert item.url == first_revision.url
+        assert item.payload["commit"] == first_revision.payload["commit"] == "a" * 40
+        candidate = db.get(DiscoveryCandidate, (item.id, "qa"))
+        excerpt = db.get(SourceExcerpt, candidate.excerpt_id)
+        old_source = db.get(Source, excerpt.source_id)
+        legacy_source = Source(id="legacy-source", url=old_source.url.replace("a" * 40, revision),
+                               text=old_source.text, retrieved_on=old_source.retrieved_on)
+        db.add(legacy_source)
+        db.flush()
+        excerpt.source_id = legacy_source.id
+    assert collect()["accepted"] == 1
+    assert len(analyses) == 2
+
+    with sessions.begin() as db:
+        owner = User(email="skills-owner@example.test", password_hash="unused")
+        db.add(owner)
+        db.flush()
+        interview = InterviewSession(owner_id=owner.id, topic_id="open-interview", context={"role": "QA Engineer"},
+                                     case_state=CaseState(open_interview=True).model_dump())
+        db.add(interview)
+        db.flush()
+        interview_id = interview.id
+        opening = interview_worker.append_message(db, interview, kind="question", text="Что проверяли?")
+        db.flush()
+        first = interview_worker.append_message(
+            db, interview, kind="answer", text=task, reply_to_question_id=opening.id,
+        )
+        state, _ = interview_engine.apply_extraction(interview.case_state, interview_engine.Evidence(
+            facts=[interview_engine.Candidate(field="task", quote=task)], ambiguous=[], not_applicable=[], refused=False,
+        ), first.id, "get_case")
+        interview.case_state = state
+        assert sources_for_followup(db, interview.context, state, "action") == []
+        for role, text in (("Python Backend", task), ("QA Engineer", "Настраивал резервное копирование.")):
+            assert sources_for_followup(db, {"role": role}, {"facts": [{"field": "task", "text": text}]},
+                                        "verification") == []
+        assert sources_for_followup(db, interview.context, state, "verification", verification) == []
+        interview_worker.queue(interview, "question", intent="verification", answer_id=first.id)
+
+    async def question_model(settings, schema, instructions, payload):
+        if schema is interview_engine.SummaryOrder:
+            return schema(fact_numbers=[1, 2])
+        assert payload["market_context"][0]["task_excerpt"] == verification
+        assert payload["market_context"][0]["provider"] == "skills"
+        return schema(text="Как вы проверяли результат взаимодействия до и после действия?", source_number=1)
+
+    answer_text = "Сравнил скриншоты с эталонами."
+
+    async def extract(settings, question, answer, state):
+        assert question == "Как вы проверяли результат взаимодействия до и после действия?"
+        return interview_engine.Evidence(facts=[interview_engine.Candidate(field="verification", quote=answer_text)],
+                                         ambiguous=[], not_applicable=[], refused=False)
+
+    monkeypatch.setattr(interview_engine, "ask_model", question_model)
+    monkeypatch.setattr(interview_worker, "extract", extract)
+
+    def run_stage():
+        job = interview_worker.claim(sessions, 30)
+        assert job and job[0] == interview_id
+        asyncio.run(interview_worker.execute_stage(sessions, settings, *job))
+
+    run_stage()
+    with sessions.begin() as db:
+        interview = db.get(InterviewSession, interview_id)
+        question = db.get(Message, interview.current_question_id)
+        trace = question.market_sources[0]
+        assert trace["provider"] == "skills" and trace["used"]
+        assert "/blob/" + ("a" * 40) + "/" in trace["url"]
+        assert message_view(question).source_quote.quote == verification
+        reply = interview_worker.append_message(
+            db, interview, kind="answer", status="queued", text=answer_text, reply_to_question_id=question.id,
+        )
+        interview_worker.queue(interview, "synthesis", completion_version=interview.version,
+                               answer_id=reply.id, current_intent="verification")
+    run_stage()
+
+    raw += "\nChanged how screenshots are archived.\n"
+    revision = "c" * 40
+    invalid_fragment = True
+    assert collect()["accepted"] == 0
+    with sessions.begin() as db:
+        card = db.scalar(select(KnowledgeCard).where(KnowledgeCard.session_id == interview_id))
+        fact = card.content["verification"][0]
+        assert fact["text"] == answer_text
+        answer = db.get(Message, fact["supporting_message_ids"][0])
+        question = db.get(Message, answer.reply_to_question_id)
+        assert question.market_sources[0] == trace
+        assert db.get(DiscoveryRevision, (trace["item_id"], trace["revision_digest"])).url == trace["url"]
+        assert db.get(DiscoveryCandidate, (trace["item_id"], "qa")).status == "observe"
+        state = {"facts": [{"field": "task", "text": task}]}
+        assert sources_for_followup(db, {"role": "QA Engineer"}, state, "verification") == []
+    invalid_fragment = False
+    assert collect()["accepted"] == 1
+    async def change_skill_during_generation(settings, schema, instructions, payload):
+        with sessions.begin() as db:
+            candidate = db.get(DiscoveryCandidate, (trace["item_id"], "qa"))
+            candidate.valid_until = now() - timedelta(seconds=1)
+        return schema(text="Этот вопрос с истёкшим источником не должен сохраниться?", source_number=1)
+
+    monkeypatch.setattr(interview_engine, "ask_model", change_skill_during_generation)
+    with sessions.begin() as db:
+        interview = db.get(InterviewSession, interview_id)
+        interview.case_state = CaseState(facts=[{
+            "id": "grounded-task", "field": "task", "text": task, "supporting_message_ids": ["earlier-answer"],
+        }]).model_dump()
+        interview_worker.queue(interview, "question", intent="verification")
+    run_stage()
+    with sessions() as db:
+        interview = db.get(InterviewSession, interview_id)
+        fallback = db.get(Message, interview.current_question_id)
+        assert fallback.text == interview_engine.FALLBACK_QUESTIONS["verification"]
+        assert fallback.market_sources is None
+        assert sources_for_followup(db, {"role": "QA Engineer"}, state, "verification") == []
+
+
+def test_skill_labels_and_reuse_of_prior_case_are_conservative():
+    evidence = {"supporting_message_ids": ["answer-1"], "responsibility": "personal"}
+    assert fact_skills({**evidence, "text": "Я настроил Postgres."}, "actions") == ["postgresql"]
+    for text in ("Другая команда проверила результат в Playwright.", "The vendor tested with Selenium.",
+                 "Я не применял Docker.", "Мы рассматривали Playwright.", "Планировал использовать Docker.",
+                 "Я проверил строку «использовал Postgres»", "Проверил наличие Docker."):
+        assert fact_skills({**evidence, "text": text}, "verification") == []
+    assert fact_skills({**evidence, "text": "I configured Docker.", "source": "owner_edit"}, "actions") == []
+
+    old = "Предыдущий проект работал только в локальной сети."
+    state = {"past_cases": [{"state": {"facts": [{"field": "context", "text": old},
+                                                {"field": "decision", "text": "Старое решение"}]}}]}
+    assert prior_case_context(state, "Задача была похожая.") == []
+    assert prior_case_context(state, "Да, в том же проекте.") == [old]
+    assert prior_case_context(state, "Работали по-разному.",
+                              ["Это был другой проект.", "Да, в том же проекте."]) == []
+
+
+def test_only_current_published_card_gaps_reach_question_and_unpublish_invalidates_them(sessions, monkeypatch):
+    task = "Проверяли поведение интерфейса при обновлении страницы."
+    action = "Я настроил Playwright для проверки страницы."
+    state = CaseState(facts=[
+        {"field": "task", "id": "task", "text": task, "supporting_message_ids": ["answer"]},
+        {"field": "action", "id": "action", "text": action, "responsibility": "personal",
+         "supporting_message_ids": ["answer"]},
+    ]).model_dump()
+    content = interview_engine.render_card("Проверка UI", state, state["facts"])[0]
+    assert content["actions"][0]["skills"] == ["playwright"]
+    content["context"] = [{"text": "Отдельный тестовый стенд. PRIVATE_SENTINEL",
+                           "supporting_message_ids": ["older-answer"], "source": "interview"}]
+    assert "verification" in content["unknown_fields"]
+    with sessions.begin() as db:
+        users = [User(email=f"knowledge-{index}@example.test", password_hash="unused") for index in range(3)]
+        db.add_all(users)
+        db.flush()
+        authors = [InterviewSession(owner_id=user.id, topic_id="open-interview", context={"role": "QA Engineer"},
+                                    status="completed") for user in users[1:]]
+        current = InterviewSession(owner_id=users[0].id, topic_id="open-interview",
+                                   context={"role": "QA Engineer"}, case_state=state)
+        db.add_all([current, *authors])
+        db.flush()
+        cards = [KnowledgeCard(session_id=item.id, owner_id=item.owner_id, origin="human", completion_version=1,
+                               catalog_profession_id="qa", publication_status="published", review_status="reviewed",
+                               consent={"content_version": 1}, review={"content_version": review_version,
+                               "decision": "accept"}, content=content, text="PRIVATE_SENTINEL")
+                 for item, review_version in zip(authors, (1, 5))]
+        db.add_all(cards)
+        db.flush()
+        current_id, selected_id = current.id, cards[0].id
+        interview_worker.queue(current, "question", intent="verification")
+    model_contexts = []
+    unpublish = False
+
+    async def model(settings, schema, instructions, payload):
+        model_contexts.append(payload.get("knowledge_gaps"))
+        assert "PRIVATE_SENTINEL" not in str(payload)
+        if unpublish:
+            with sessions.begin() as db:
+                published = db.get(KnowledgeCard, selected_id)
+                published.publication_status = "draft"
+                published.consent = None
+                published.version += 1
+        return schema(text="Как вы отличали обновление интерфейса от ошибки проверки?")
+
+    monkeypatch.setattr(interview_engine, "ask_model", model)
+    for index in range(3):
+        unpublish = index == 1
+        claim = interview_worker.claim(sessions, 20)
+        assert claim and claim[0] == current_id
+        asyncio.run(interview_worker.execute_stage(sessions, Settings(), *claim))
+        with sessions.begin() as db:
+            current = db.get(InterviewSession, current_id)
+            question = db.get(Message, current.current_question_id)
+            assert "knowledge_gaps" not in current.case_state
+            assert question.market_sources is None
+            assert question.text == (interview_engine.FALLBACK_QUESTIONS["verification"] if unpublish else
+                                     "Как вы отличали обновление интерфейса от ошибки проверки?")
+            if index < 2:
+                interview_worker.queue(current, "question", intent="verification")
+    assert model_contexts == [{"aspect": "verification", "shared_skills": ["playwright"],
+                               "conditions_to_clarify": ["тестовая среда"]}] * 2 + [None]
 
 
 def test_issues_pages_comments_filters_and_reopened():
@@ -93,6 +350,100 @@ def test_github_token_never_follows_redirect_off_origin():
         with pytest.raises(CollectionError, match="outside its API"):
             fetch(client, "https://api.github.com/repos/sample/project")
     assert seen == ["api.github.com"]
+
+
+def test_openalex_admits_grounded_research_and_removes_it_on_crossref_notice(sessions, monkeypatch):
+    doi = "10.1234/flaky"
+    published = (now() - timedelta(days=365)).date().isoformat()
+    method = "We repeatedly ran each flaky test using pytest."
+    sample = "The sample contained 40 Python projects."
+    result = "Repeated test runs detected 19 additional failures."
+    limitation = "The study covered Python projects from public repositories."
+    work = {
+        "id": "https://openalex.org/W10", "doi": f"https://doi.org/{doi}",
+        "display_name": "Flaky test detection", "publication_date": published,
+        "type": "article", "is_retracted": False, "has_content": {"grobid_xml": True},
+        "best_oa_location": {"is_oa": True, "version": "publishedVersion", "license": "cc-by"},
+    }
+    xml = f"""<TEI xmlns="http://www.tei-c.org/ns/1.0">
+      <teiHeader><fileDesc><sourceDesc><idno type="DOI">{doi}</idno></sourceDesc></fileDesc></teiHeader>
+      <text><body>
+        <div><head>Methodology</head><p>{method}</p><p>{sample}</p></div>
+        <div><head>Results</head><p>{result}</p></div>
+        <div><head>Threats to Validity</head><p>{limitation}</p></div>
+      </body></text></TEI>"""
+    real_client = httpx.Client
+    notice = False
+    mismatch = False
+
+    def upstream(request):
+        if request.url.host in {"api.openalex.org", "content.openalex.org"}:
+            assert request.headers["authorization"] == "Bearer test-key"
+            if request.url.host == "content.openalex.org":
+                assert request.url.path == "/works/W10.grobid-xml"
+                return httpx.Response(200, text=xml)
+            return httpx.Response(200, json={"results": [work, work]} if request.url.path == "/works" else work)
+        assert "authorization" not in request.headers
+        if request.url.host == "api.crossref.org":
+            if request.url.path == "/works":
+                assert request.url.params["filter"] == f"updates:{doi}"
+                return httpx.Response(200, json={"message": {"total-results": int(notice)}})
+            return httpx.Response(200, json={"message": {"DOI": doi, "type": "journal-article", "ISSN": ["1111-1111"]}})
+        assert request.url.host == "doaj.org"
+        return httpx.Response(200, json={"results": [{"id": "verified", "bibjson": {"identifier": [
+            {"type": "doi", "id": doi}, {"type": "eissn", "id": "1111-1111"},
+        ]}}]})
+
+    async def model(settings, name, schema, instructions, payload):
+        assert payload["sections"]["method"][0]["heading"] == "Methodology"
+        return {"relevant": True, "task": "flaky test detection", "quote": result,
+                "detail": "19 additional failures", "method": method, "sample": sample,
+                "conditions": ["pytest"], "limitation": "A made-up limitation." if mismatch else limitation,
+                "technology": "pytest", "version": None}
+
+    monkeypatch.setattr(openalex.httpx, "Client",
+                        lambda **kwargs: real_client(transport=httpx.MockTransport(upstream), **kwargs))
+    monkeypatch.setattr(openalex, "structured_completion", model)
+    settings = Settings(openalex_api_key="test-key", llm_base_url="http://localhost:8001/v1", llm_model="test")
+
+    def collect_for(profession):
+        return openalex.collect_research(sessions, settings, profession, overrides=("flaky test detection",))
+
+    assert collect_for("qa")["accepted"] == 1
+    mismatch = True
+    assert collect_for("python_backend")["accepted"] == 0
+    with sessions() as db:
+        item = db.scalar(select(DiscoveryItem).where(DiscoveryItem.provider == "openalex"))
+        candidate = db.get(DiscoveryCandidate, (item.id, "qa"))
+        output = discovery.candidate_output(db, item, candidate, include_text=True)
+        assert output["assessment"]["sections"]["limitation"] == "Threats to Validity"
+        assert output["payload"]["review_url"] == "https://doaj.org/article/verified"
+        assert "sections" not in output["payload"]
+        assert db.get(DiscoveryCandidate, (item.id, "python_backend")).status == "observe"
+        item_id, excerpt_id = item.id, candidate.excerpt_id
+        state = {"facts": [{"field": "task", "text": "flaky test detection using pytest"}]}
+        monkeypatch.setattr("backend.source_context.profession_for_question", lambda *_: "qa")
+        assert sources_for_followup(db, {}, state, "verification")[0]["excerpt_id"] == excerpt_id
+
+    notice = True
+    assert collect_for("qa")["accepted"] == 0
+    with sessions() as db:
+        assert db.get(DiscoveryCandidate, (item_id, "qa")).status == "rejected"
+        assert db.get(DiscoveryCandidate, (item_id, "qa")).excerpt_id == excerpt_id
+        assert db.scalar(select(func.count()).select_from(DiscoveryRevision).where(
+            DiscoveryRevision.item_id == item_id)) == 2
+        monkeypatch.setattr("backend.source_context.sources_for_question", lambda *args, **kwargs: [])
+        assert sources_for_followup(db, {}, state, "verification") == []
+
+
+def test_openalex_never_uses_abstract_or_xml_from_another_doi():
+    doi = "10.1234/right"
+    xml = b"""<TEI xmlns="http://www.tei-c.org/ns/1.0">
+      <teiHeader><idno type="DOI">10.1234/wrong</idno></teiHeader>
+      <text><front><div><head>Methods</head><p>Text only in the abstract.</p></div></front><body/></text>
+    </TEI>"""
+    assert openalex.full_text_sections(xml, doi) == {}
+    assert not any(openalex.full_text_sections(xml, "10.1234/wrong").values())
 
 
 def test_discovery_view_is_editor_only_and_filters_before_pagination(sessions):
@@ -158,6 +509,117 @@ def test_editor_starts_collection_with_manual_terms_and_sees_rate_limit(sessions
         assert response.headers["Retry-After"] == "90"
         removed = client.post(path, headers=headers, json={**payload, "provider": "arxiv"})
         assert removed.status_code == 422
+    with sessions() as db:
+        assert db.get(VacancyCollection, "frontend").discovery_searches == {
+            "trends": {"values": ["react", "vite"], "labels": [], "limit": 7},
+        }
+
+
+def test_profession_collection_can_retry_only_failed_source(sessions, monkeypatch):
+    calls = []
+
+    def refresh(_, settings, profession, source):
+        assert profession == "python_backend"
+        calls.append(source)
+        if source == "github" and calls.count(source) == 1:
+            raise ProviderRateLimit("rate limited", 90)
+        return {"status": "ok", "collected": 1}
+
+    monkeypatch.setattr(profession_collection, "refresh_source", refresh)
+    app = create_app()
+    actor = {"id": "actor", "is_editor": False}
+    app.dependency_overrides[current_user] = lambda: actor
+    path = "/api/v1/discovery/collection/python_backend"
+    headers = {"Origin": app.state.app_origin}
+    with TestClient(app) as client:
+        assert client.get(path).status_code == 403
+        assert client.post(path, headers=headers).status_code == 403
+        actor["is_editor"] = True
+        assert client.post(path).status_code == 403
+        assert client.get(path).json()["run"] is None
+        started = client.post(path, headers=headers)
+        assert started.status_code == 202 and started.json()["running"]
+        assert sorted(calls) == sorted(profession_collection.SOURCES)
+        status = client.get(path).json()
+        run = status["run"]
+        assert not run["running"]
+        assert run["steps"]["github"] == {"status": "failed", "code": "DISCOVERY_RATE_LIMIT"}
+        assert run["steps"]["hn"]["collected"] == 1
+        assert run["steps"]["openalex"]["collected"] == 1
+        assert status["quality"]["materials"]["github"] == {}
+        retry = client.post(path, headers=headers, json={"run_id": run["id"], "source": "github"})
+        complete = client.get(path).json()["run"]
+        assert retry.status_code == 202 and complete["id"] != run["id"]
+        assert complete["steps"]["github"]["status"] == "ok"
+        assert complete["steps"]["docs"] == run["steps"]["docs"]
+        assert calls[-1] == "github" and len(calls) == len(profession_collection.SOURCES) + 1
+        stale = client.post(path, headers=headers, json={"run_id": run["id"], "source": "github"})
+        finished = client.post(path, headers=headers, json={"run_id": complete["id"], "source": "docs"})
+        for rejected in (stale, finished):
+            assert rejected.status_code == 409
+            assert rejected.json()["error"]["code"] == "COLLECTION_RETRY_UNAVAILABLE"
+        assert client.get(path).json()["run"] == complete
+        assert len(calls) == len(profession_collection.SOURCES) + 1
+
+
+def test_active_profession_run_is_reused_and_expired_run_can_be_retried(sessions, monkeypatch):
+    with sessions.begin() as db:
+        run, token = profession_collection.start(db, "python_backend")
+    with sessions.begin() as db:
+        same, duplicate = profession_collection.start(db, "python_backend")
+    assert same == run and duplicate is None
+    monkeypatch.setattr(profession_collection, "now", lambda: now() + timedelta(minutes=5))
+    with sessions.begin() as db:
+        retry, new_token = profession_collection.start(db, "python_backend", token, "github")
+    assert new_token != token
+    assert retry["steps"]["docs"]["status"] == "interrupted"
+    assert not profession_collection.change_steps(sessions, "python_backend", token, {})
+
+
+def test_parallel_github_collection_uses_the_same_database_lease(sessions, monkeypatch):
+    stamp = now()
+    monkeypatch.setattr(discovery, "now", lambda: stamp)
+    with ExitStack() as old, ExitStack() as replacement:
+        old.enter_context(discovery.collection_lease(sessions, "github"))
+        with pytest.raises(discovery.DiscoveryBusy), discovery.collection_lease(sessions, "github"):
+            pytest.fail("The same source was allowed to collect concurrently")
+        with discovery.collection_lease(sessions, "trends"):
+            pass
+        stamp += timedelta(minutes=16)
+        replacement.enter_context(discovery.collection_lease(sessions, "github"))
+        old.close()
+        with pytest.raises(discovery.DiscoveryBusy), discovery.collection_lease(sessions, "github"):
+            pytest.fail("The previous collector released the replacement's lease")
+    with discovery.collection_lease(sessions, "github"):
+        pass
+
+
+def test_new_source_revision_preserves_old_payload_and_requires_reevaluation(sessions):
+    first = Collected("github:100", "Case", "https://github.com/example/project/issues/10",
+                      {"fragments": {"body": {"text": "First description"}}})
+    changed = Collected(first.id, first.title, first.url, {"fragments": {"body": {"text": "Updated description"}}})
+    stamp = now()
+    with sessions.begin() as db:
+        discovery.collect_records(db, "github", "python_backend", [first], stamp - timedelta(minutes=1))
+        discovery.collect_records(db, "github", "qa", [first], stamp - timedelta(minutes=1))
+    with sessions.begin() as db:
+        review = db.get(DiscoveryCandidate, (first.id, "python_backend"))
+        review.status = "accepted"
+        review.reviewed_digest = discovery.item_digest(first)
+        review.valid_until = stamp + timedelta(days=1)
+    with sessions() as db:
+        assert profession_collection.quality(db, "python_backend", Settings())["materials"]["github"] == {"accepted": 1}
+    with sessions.begin() as db:
+        discovery.collect_records(db, "github", "python_backend", [changed], stamp)
+        discovery.collect_records(db, "github", "python_backend", [first], stamp - timedelta(seconds=1))
+    with sessions() as db:
+        revisions = list(db.scalars(select(DiscoveryRevision).where(DiscoveryRevision.item_id == first.id)))
+        assert {row.digest: row.payload for row in revisions} == {
+            discovery.item_digest(first): first.payload, discovery.item_digest(changed): changed.payload,
+        }
+        assert db.get(DiscoveryItem, first.id).payload == changed.payload
+        for profile in ("python_backend", "qa"):
+            assert profession_collection.quality(db, profile, Settings())["materials"]["github"] == {"automatic_check": 1}
 
 
 def test_github_collection_saves_candidates_for_automatic_check(sessions, monkeypatch):
@@ -205,13 +667,16 @@ def test_trends_fetch_once_and_compare_weekly_counters(sessions):
     one = results[0]
     today = datetime(2026, 7, 1)
     with sessions.begin() as db:
-        discovery.collect_records(db, "trends", "python_backend", results, today - timedelta(days=7))
-        discovery.collect_records(db, "trends", "python_backend", results, today - timedelta(days=7))
+        discovery.collect_records(db, "trends", "python_backend", results, today - timedelta(days=6))
+        discovery.collect_records(db, "trends", "python_backend", results, today - timedelta(days=6))
         assert discovery.list_candidates(db, "python_backend", 10)[0]["weekly_star_change"] is None
         increased = Collected(one.id, one.title, one.url, {**one.payload, "stars": 147})
         discovery.collect_records(db, "trends", "python_backend", [increased], today)
         assert discovery.list_candidates(db, "python_backend", 10)[0]["weekly_star_change"] == 17
         assert db.scalar(select(func.count()).select_from(RepositoryObservation)) == 2
+        exact = Collected(one.id, one.title, one.url, {**one.payload, "stars": 129})
+        discovery.collect_records(db, "trends", "python_backend", [exact], today - timedelta(days=7))
+        assert discovery.list_candidates(db, "python_backend", 10)[0]["weekly_star_change"] == 18
 
 
 def test_automatic_check_retries_verifies_provenance_and_invalidates_old_excerpt(sessions, monkeypatch):

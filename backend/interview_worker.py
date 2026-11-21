@@ -13,6 +13,7 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from backend.db import InterviewSession, KnowledgeCard, Message, Topic, now
 from backend.interview_engine import (
+    FALLBACK_QUESTIONS,
     InvalidModelOutput,
     apply_extraction,
     case_answer,
@@ -25,7 +26,8 @@ from backend.interview_engine import (
     synthesize,
 )
 from backend.interview_schemas import CaseState, OPEN_TOPIC_ID
-from backend.source_context import sources_for_followup
+from backend.knowledge import prior_case_context, publication_versions_current, published_context
+from backend.source_context import skill_sources_current, sources_for_followup
 
 logger = logging.getLogger(__name__)
 
@@ -45,12 +47,6 @@ def clear_job(interview):
     interview.lease_until = None
 
 
-def messages_for(db, interview_id):
-    return list(db.scalars(
-        select(Message).where(Message.session_id == interview_id).order_by(Message.sequence)
-    ))
-
-
 def recent_history(db, interview, current_answer):
     start = interview.case_state.get("case_start_sequence")
     if start is None and not interview.case_state.get("active_topic_id"):
@@ -68,7 +64,7 @@ def recent_history(db, interview, current_answer):
             record.get("assessment") is None and record.get("facts")
         ):
             continue
-        question = db.get(Message, reply.reply_to_question_id)
+        question = answer_question(db, interview, reply)
         turns.append({"question": (question.text or "")[:400] if question else "",
                       "answer": (reply.text or "")[:1000]})
         if len(turns) == 3:
@@ -158,8 +154,12 @@ def job_answer(db, interview, job):
 
 
 def answer_question(db, interview, answer):
-    question = db.get(Message, answer.reply_to_question_id) if answer and answer.reply_to_question_id else None
-    if question and question.session_id == interview.id and question.kind == "question":
+    return interview_question(db, interview, answer.reply_to_question_id) if answer else None
+
+
+def interview_question(db, interview, question_id):
+    question = db.get(Message, question_id) if question_id else None
+    if question and question.session_id == interview.id and question.kind == "question" and question.text:
         return question
     return None
 
@@ -177,7 +177,9 @@ def valid_job(db, interview, job):
             return True
     elif stage != "extraction":
         return False
-    return bool(job.get("current_intent") and answer_question(db, interview, job_answer(db, interview, job)))
+    answer = job_answer(db, interview, job)
+    intent = job.get("current_intent")
+    return bool(isinstance(intent, str) and intent and answer and answer.text and answer_question(db, interview, answer))
 
 
 def claim(sessions, timeout):
@@ -213,9 +215,13 @@ async def execute_stage(sessions, settings, interview_id, token):
         interview = get_claimed(db, interview_id, token)
         if interview is None:
             return
-        job, stage, state = interview.job, interview.processing_stage, interview.case_state
+        job, stage = job_payload(interview), interview.processing_stage
         if not valid_job(db, interview, job):
             raise InvalidJob("Incomplete processing job")
+        try:
+            state = CaseState.model_validate(interview.case_state).model_dump()
+        except ValidationError as exc:
+            raise InvalidJob("Invalid interview case state") from exc
         active_id = state.get("active_topic_id")
         topic = (db.get(Topic, active_id) if active_id else None) or db.get(Topic, interview.topic_id)
         if topic is None:
@@ -225,13 +231,27 @@ async def execute_stage(sessions, settings, interview_id, token):
         model_state = {**state, "intake": interview.context,
                        "recent_history": recent_history(db, interview, message)}
         market_sources = []
+        publication_versions = {}
         if stage == "question":
+            if state["past_cases"] and state.get("case_start_sequence") is not None and message:
+                # Identity corrections matter even when extraction marked the turn unrelated.
+                recent_answers = db.scalars(select(Message.text).where(
+                    Message.session_id == interview.id, Message.kind == "answer", Message.status == "processed",
+                    Message.sequence >= state["case_start_sequence"], Message.sequence < message.sequence,
+                    Message.text.is_not(None),
+                ).order_by(Message.sequence.desc()).limit(6))
+                previous = prior_case_context(state, message.text or "", recent_answers)
+                if previous and job["intent"] in {"action", "decision", "verification", "context"}:
+                    model_state["prior_project_context"] = previous
+            gaps, publication_versions = published_context(db, interview, state, job["intent"])
+            if gaps:
+                model_state["knowledge_gaps"] = gaps
             market_sources = sources_for_followup(
                 db, interview.context, model_state, job["intent"], message.text if message else "",
             )
         if market_sources:
             model_state["market_context"] = [
-                {key: source[key] for key in ("task_excerpt", "skills", "kind", "purpose", "detail", "version")
+                {key: source[key] for key in ("task_excerpt", "skills", "kind", "purpose", "detail", "version", "provider")
                  if key in source and source[key] is not None} for source in market_sources
             ]
         answer = {"id": message.id, "text": message.text} if message else None
@@ -282,7 +302,8 @@ async def execute_stage(sessions, settings, interview_id, token):
             # Render each case from its own evidence without sending an unbounded
             # multi-case transcript back to the model.
             cards = [render_card(case["title"], case["state"], case["state"]["facts"]) for case in cases]
-            output = ({"title": "Карточка интервью", "cases": [content for content, _ in cards]},
+            output = ({"title": "Карточка интервью",
+                       "cases": [{**content, "case_id": str(uuid4())} for content, _ in cards]},
                       "\n\n".join(text for _, text in cards))
     else:
         raise InvalidModelOutput("Unknown processing stage")
@@ -326,6 +347,13 @@ async def execute_stage(sessions, settings, interview_id, token):
                 interview.status = "completed"
                 clear_job(interview)
             else:
+                skill_sources = [source for source in market_sources if source.get("provider") == "skills"]
+                if publication_versions or skill_sources:
+                    db.flush()
+                    if ((publication_versions and not publication_versions_current(db, publication_versions))
+                            or not skill_sources_current(db, skill_sources)):
+                        output = FALLBACK_QUESTIONS[job["intent"]]
+                        market_sources = []
                 message = append_message(db, interview, kind="question", text=output, market_sources=market_sources or None)
                 interview.current_question_id = message.id
                 intent = "get_case" if stage == "initial_question" else job["intent"]

@@ -126,6 +126,16 @@ class DiscoveryCandidate(Base):
     retry_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
+class DiscoveryRevision(Base):
+    __tablename__ = "discovery_revisions"
+    item_id: Mapped[str] = mapped_column(ForeignKey("discovery_items.id"), primary_key=True)
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    title: Mapped[str] = mapped_column(Text)
+    url: Mapped[str] = mapped_column(Text)
+    observed_at: Mapped[datetime] = mapped_column(DateTime)
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
 class DocumentationWatch(Base):
     __tablename__ = "documentation_watches"
     id: Mapped[str] = mapped_column(String(48), primary_key=True)
@@ -155,6 +165,30 @@ class RepositoryObservation(Base):
     day: Mapped[str] = mapped_column(String(10), primary_key=True)
     observed_at: Mapped[datetime] = mapped_column(DateTime)
     stars: Mapped[int] = mapped_column(Integer)
+
+
+class HackerNewsItem(Base):
+    __tablename__ = "hacker_news_items"
+    __table_args__ = (Index("ix_hacker_news_items_status_observed_at", "status", "observed_at"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    title: Mapped[str] = mapped_column(Text)
+    url: Mapped[str] = mapped_column(Text)
+    author: Mapped[str | None] = mapped_column(String(64))
+    published_at: Mapped[datetime] = mapped_column(DateTime)
+    text: Mapped[str] = mapped_column(Text)
+    links: Mapped[list[str]] = mapped_column(JSON)
+    score: Mapped[int] = mapped_column(Integer)
+    descendants: Mapped[int] = mapped_column(Integer)
+    kids: Mapped[list[int]] = mapped_column(JSON)
+    comments: Mapped[list[dict]] = mapped_column(JSON)
+    comments_limited: Mapped[bool] = mapped_column(Boolean)
+    comments_incomplete: Mapped[bool] = mapped_column(Boolean)
+    comments_observed_at: Mapped[datetime] = mapped_column(DateTime)
+    profile_matches: Mapped[dict[str, list[str]]] = mapped_column(JSON)
+    feed_ranks: Mapped[dict[str, int]] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(16), default="new", server_default="new")
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime)
+    observed_at: Mapped[datetime] = mapped_column(DateTime)
 
 
 class InterviewSession(Base):
@@ -259,6 +293,16 @@ class VacancyCollection(Base):
     run_id: Mapped[str | None] = mapped_column(String(36))
     lease_until: Mapped[datetime | None] = mapped_column(DateTime)
     error: Mapped[str | None] = mapped_column(String(64))
+    discovery_searches: Mapped[dict | None] = mapped_column(JSON)
+
+
+class ProfessionCollectionRun(Base):
+    __tablename__ = "profession_collection_runs"
+    profession_id: Mapped[str] = mapped_column(ForeignKey("vacancy_collections.profession_id"), primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(36))
+    started_at: Mapped[datetime] = mapped_column(DateTime)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime)
+    steps: Mapped[dict] = mapped_column(JSON)
 
 
 class HeadHunterRequestWindow(Base):
@@ -273,6 +317,7 @@ class VacancySnapshot(Base):
     profession_id: Mapped[str] = mapped_column(ForeignKey("vacancy_collections.profession_id"), index=True)
     collected_at: Mapped[datetime] = mapped_column(DateTime)
     stats: Mapped[dict] = mapped_column(JSON)
+    cards: Mapped[list | None] = mapped_column(JSON)
 
 
 def database(url):

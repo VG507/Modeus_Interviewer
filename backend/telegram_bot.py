@@ -843,6 +843,9 @@ class TelegramBot:
         note = "Карточка приватная: её видите только вы."
         if card["review_status"] == "needs_changes" and review.get("comment"):
             note = f"Редактор вернул карточку: {escape(review['comment'])}"
+        if card.get("review_blocker"):
+            return await self.send(account.chat_id, f"{note}\n\n{escape(card['review_blocker'])} "
+                                                     "Дополните карточку в веб-версии Modeus.")
         await self.send(account.chat_id, f"{note}\n\nКарточку можно отправить редактору. После проверки "
                                          "она появится в публичном каталоге.",
                         [[("Отправить редактору", f"publish:{card_id}")]])

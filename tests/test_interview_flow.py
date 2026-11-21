@@ -10,8 +10,9 @@ from fastapi.testclient import TestClient
 
 from backend import interview_worker
 from backend.app import create_app
-from backend.db import Topic, User
+from backend.db import InterviewSession, Message, Topic, User
 from backend.interview_engine import Candidate, Evidence
+from backend.interview_schemas import CaseState
 from backend.security import hash_password
 from backend.settings import Settings
 
@@ -27,6 +28,108 @@ def wait_for(client, path, status, stage=None):
             return state
         time.sleep(0.025)
     raise AssertionError(state)
+
+
+def test_worker_continues_after_an_incomplete_job(tmp_path, monkeypatch):
+    url = f"sqlite:///{(tmp_path / 'worker.db').as_posix()}"
+    monkeypatch.setenv("DATABASE_URL", url)
+    command.upgrade(Config("alembic.ini"), "head")
+    app = create_app(Settings(database_url=url, app_origin=ORIGIN, documentation_weekly_enabled=False,
+                              hh_weekly_enabled=False))
+    with app.state.sessions.begin() as db:
+        owner = User(email="owner@example.test", password_hash=hash_password("test-password-123"))
+        db.add(owner)
+        db.flush()
+        invalid, opening = [InterviewSession(
+            owner_id=owner.id, topic_id="open-interview", context={"role": "QA engineer"},
+            case_state=CaseState(open_interview=True).model_dump(), processing_status="queued",
+            processing_stage=stage, job=None,
+        ) for stage in ("extraction", "initial_question")]
+        db.add_all((invalid, opening))
+        db.flush()
+        opening.case_state = {"open_interview": True}
+        missing_parent = InterviewSession(
+            owner_id=owner.id, topic_id="open-interview", context={"role": "QA engineer"},
+            case_state=CaseState(open_interview=True).model_dump(), processing_status="queued",
+            processing_stage="extraction", job={"current_intent": "get_case"},
+        )
+        db.add(missing_parent)
+        db.flush()
+        without_question = Message(session_id=missing_parent.id, sequence=1, kind="answer",
+                                   text="Ответ из старой записи", status="queued")
+        db.add(without_question)
+        db.flush()
+        missing_parent.job = {**missing_parent.job, "answer_id": without_question.id}
+    with TestClient(app) as client:
+        assert client.post("/api/v1/auth/login", headers={"Origin": ORIGIN}, json={
+            "email": owner.email, "password": "test-password-123",
+        }).status_code == 200
+        invalid_path = f"/api/v1/interviews/{invalid.id}"
+        failed = wait_for(client, invalid_path, "failed", "extraction")
+        assert failed["error"]["code"] == "INVALID_STATE"
+        assert not failed["error"]["retryable"]
+        retry = client.post(invalid_path + "/retry", headers={"Origin": ORIGIN, "Idempotency-Key": str(uuid4())},
+                            json={"expected_version": failed["version"]})
+        assert retry.status_code == 409
+        assert wait_for(client, f"/api/v1/interviews/{opening.id}", "idle")["current_question_id"]
+        failed = wait_for(client, f"/api/v1/interviews/{missing_parent.id}", "failed", "extraction")
+        assert failed["error"]["code"] == "INVALID_STATE"
+        with app.state.sessions() as db:
+            assert db.get(Message, without_question.id).status == "failed"
+
+
+def test_invalid_question_state_is_rejected_without_writing(tmp_path, monkeypatch):
+    url = f"sqlite:///{(tmp_path / 'question.db').as_posix()}"
+    monkeypatch.setenv("DATABASE_URL", url)
+    command.upgrade(Config("alembic.ini"), "head")
+    app = create_app(Settings(database_url=url, app_origin=ORIGIN, hh_weekly_enabled=False,
+                              documentation_weekly_enabled=False))
+    with app.state.sessions.begin() as db:
+        owner = User(email="owner@example.test", password_hash=hash_password("test-password-123"))
+        db.add(owner)
+        db.flush()
+        db.add(Topic(id="audit-topic", profession_id="python_backend", title="Исходная тема", source_ids=[]))
+        db.flush()
+        interview = InterviewSession(
+            owner_id=owner.id, topic_id="audit-topic", context={"role": "Backend"},
+            case_state=CaseState(active_topic_id="retired-topic", asked_intents=["get_case"]).model_dump(),
+            current_question_id="missing-question",
+        )
+        db.add(interview)
+        db.flush()
+    with TestClient(app, raise_server_exceptions=False) as client:
+        assert client.post("/api/v1/auth/login", headers={"Origin": ORIGIN}, json={
+            "email": owner.email, "password": "test-password-123",
+        }).status_code == 200
+        path = f"/api/v1/interviews/{interview.id}"
+
+        def post(suffix, payload):
+            return client.post(path + suffix, json={"expected_version": 1, **payload},
+                               headers={"Origin": ORIGIN, "Idempotency-Key": str(uuid4())})
+
+        for result in (post("/answers", {"question_id": "missing-question", "text": "Ответ"}), post("/skip", {})):
+            assert result.status_code == 409
+            assert result.json()["error"]["code"] == "INVALID_STATE"
+        assert client.get(path).json()["current_topic_title"] == "Исходная тема"
+        assert client.get("/api/v1/interviews").json()["items"][0]["current_topic_title"] == "Исходная тема"
+
+        with app.state.sessions.begin() as db:
+            record = db.get(InterviewSession, interview.id)
+            question = Message(session_id=record.id, sequence=1, kind="question", text="Что случилось?",
+                               status="processed")
+            db.add(question)
+            db.flush()
+            record.current_question_id = question.id
+            record.case_state = {**record.case_state, "asked_intents": []}
+            draft = Message(session_id=record.id, sequence=2, kind="answer", text="Ответ",
+                            status="draft", reply_to_question_id=question.id)
+            db.add(draft)
+            db.flush()
+        assert post(f"/answers/{draft.id}/submit", {}).status_code == 409
+        assert post("/skip", {}).status_code == 409
+        detail = client.get(path).json()
+        assert detail["version"] == 1
+        assert [message["status"] for message in detail["messages"]] == ["processed", "draft"]
 
 
 def test_interview_retries_and_private_draft(tmp_path, monkeypatch):

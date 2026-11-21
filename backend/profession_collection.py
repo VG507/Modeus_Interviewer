@@ -9,6 +9,7 @@ import httpx
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import load_only
 
+from backend.agent_skills import collect_skills
 from backend.db import (
     DiscoveryCandidate, DiscoveryItem, DocumentationSubscription, ProfessionCollectionRun, VacancyCollection, now,
 )
@@ -21,7 +22,7 @@ from backend.vacancy_import import FRESH_FOR, claim_collection, configured, run_
 
 
 logger = logging.getLogger(__name__)
-SOURCES = ("hh", "github", "trends", "docs", "hn", "openalex")
+SOURCES = ("hh", "github", "trends", "docs", "hn", "openalex", "skills")
 ACTIVE = {"queued", "running"}
 RETRYABLE = {"partial", "failed", "busy", "interrupted"}
 LEASE = timedelta(minutes=2)
@@ -114,6 +115,8 @@ def refresh_sources(sessions, settings, profession, run_id, only=None):
 
 
 def refresh_source(sessions, settings, profession, source):
+    if source == "skills":
+        return collect_skills(sessions, settings, profession)
     if source == "openalex":
         return collect_research(sessions, settings, profession)
     if source == "hh":

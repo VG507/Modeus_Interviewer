@@ -75,7 +75,7 @@ def test_interview_in_telegram(tmp_path, monkeypatch):
         return "Почему вы решили добавить индекс?"
 
     async def synthesize(settings, title, state):
-        return {"title": title, "actions": [state["facts"][1]]}, "Добавлен индекс для отчёта."
+        return {"title": title, "task": [state["facts"][0]], "actions": [state["facts"][1]]}, "Добавлен индекс для отчёта."
 
     monkeypatch.setattr(interview_worker, "extract", extract)
     monkeypatch.setattr(interview_worker, "formulate", formulate)

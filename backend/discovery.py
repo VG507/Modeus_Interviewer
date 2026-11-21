@@ -24,7 +24,7 @@ from backend.vacancy_parser import canonical_skill, skill_hits
 
 DEFAULT_REPOS = ("sqlalchemy/sqlalchemy", "celery/celery")
 DEFAULT_TOPICS = ("llm", "rag", "vector-database")
-ACTIVE_PROVIDERS = ("github", "trends", "docs", "openalex")
+ACTIVE_PROVIDERS = ("github", "trends", "docs", "openalex", "skills")
 
 
 class InvalidDiscoveryQuery(CollectionError):
@@ -50,7 +50,11 @@ def insert_row(db, model, values, keys, *, changes=None, condition=None):
 def item_digest(item):
     evidence = {key: value for key, value in item.payload.items()
                 if key not in {"stars", "forks", "pushed_at", "previous_digest"}}
-    return hashlib.sha256(json.dumps([item.title, item.url, evidence], sort_keys=True).encode()).hexdigest()
+    source = item.url
+    if item.id.startswith("skills:"):
+        evidence.pop("commit", None)
+        source = item.id
+    return hashlib.sha256(json.dumps([item.title, source, evidence], sort_keys=True).encode()).hexdigest()
 
 
 def collect_records(db, provider, profession, items, observed_at):
@@ -60,7 +64,7 @@ def collect_records(db, provider, profession, items, observed_at):
         replace = DiscoveryItem.observed_at <= observed_at
         insert_row(db, DiscoveryItem, {"id": item.id, "provider": provider, **state}, ["id"],
                    changes=state, condition=replace)
-        if provider in {"github", "trends", "openalex"}:
+        if provider in {"github", "trends", "openalex", "skills"}:
             insert_row(db, DiscoveryRevision, {"item_id": item.id, **state}, ["item_id", "digest"])
         insert_row(db, DiscoveryCandidate, {"item_id": item.id, "profession_id": profession,
                                             "status": "observe" if provider == "trends" else "new"},

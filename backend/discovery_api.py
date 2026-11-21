@@ -25,7 +25,7 @@ from backend.vacancy_api import check_profile, require_editor, require_editor_wr
 
 router = APIRouter(prefix="/api/v1/discovery")
 SearchProvider = Literal["github", "trends"]
-Provider = Literal["github", "trends", "docs", "openalex"]
+Provider = Literal["github", "trends", "docs", "openalex", "skills"]
 SearchTerm = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=140)]
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ class DocumentationProfile(Schema):
 
 class CollectionRetry(Schema):
     run_id: Annotated[str, StringConstraints(min_length=36, max_length=36)]
-    source: Literal["hh", "github", "trends", "docs", "hn", "openalex"]
+    source: Literal["hh", "github", "trends", "docs", "hn", "openalex", "skills"]
 
 
 class DocumentationConfig(DocumentationProfile):

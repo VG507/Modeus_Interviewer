@@ -59,8 +59,10 @@ function Filter({ id, label, value, onChange, choices }: {
   </div>;
 }
 
-export function Vacancies({ onSessionExpired }: { onSessionExpired: () => void }) {
-  const [profile, setProfile] = useState('python_backend');
+export function Vacancies({ profile, collectionRefresh, onProfileSaved, onSessionExpired }: {
+  profile: string; collectionRefresh: number; onProfileSaved: (profile: { id: string; title: string }) => void;
+  onSessionExpired: () => void;
+}) {
   const [experience, setExperience] = useState('');
   const [level, setLevel] = useState('');
   const [overview, setOverview] = useState<Overview>();
@@ -108,7 +110,7 @@ export function Vacancies({ onSessionExpired }: { onSessionExpired: () => void }
     }
     void load();
     return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [refresh, onSessionExpired]);
+  }, [refresh, collectionRefresh, onSessionExpired]);
 
   useEffect(() => {
     if (!revision) return;
@@ -176,10 +178,8 @@ export function Vacancies({ onSessionExpired }: { onSessionExpired: () => void }
         method: draft.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: draft.title, search_query: draft.search_query, aliases }),
       });
-      setProfile(result.id);
-      setExperience('');
-      setLevel('');
       setDraft(undefined);
+      onProfileSaved({ id: result.id, title: draft.title.trim() });
       setRefresh(value => value + 1);
       if (candidates) void loadCandidates();
     } catch (error) {
@@ -208,22 +208,9 @@ export function Vacancies({ onSessionExpired }: { onSessionExpired: () => void }
   }
 
   return <div className="stack">
-    <h1>Вакансии</h1>
     {connectionError && <p role="alert">{connectionError} {overview && 'Показаны последние полученные данные.'}</p>}
-    {overview ? <section className="panel" aria-label="Профили вакансий">
-      <h2>Профили <span className="market-muted">{overview.profiles.length}</span></h2>
-      <ul className="market-profiles">{overview.profiles.map(item => <li key={item.id}>
-        <button type="button" className="secondary market-profile" aria-pressed={item.id === profile}
-          disabled={busy} onClick={() => { setProfile(item.id); setActionError(''); setListError(''); }}>
-          <strong>{item.title}</strong>
-          <span>{item.running ? 'Идёт сбор' : item.error ? item.error === 'HH_CANCELLED' ? 'Остановлен' : 'Сбой сбора'
-            : item.stale ? 'Выборка устарела' : item.updated_at ? 'Выборка готова' : 'Сбора ещё не было'}</span>
-          <span>Вакансий: {item.stats.vacancies ?? 0}</span>
-          <span>{item.approved ? 'Включён для интервью' : 'Требует проверки редактора'}</span>
-          {item.updated_at && <time dateTime={item.updated_at}>Обновлено {dateFormat.format(new Date(item.updated_at))}</time>}
-        </button>
-      </li>)}</ul>
-      <div className="actions market-profile-actions">
+    {overview ? <section className="panel" aria-label="Управление профессиями">
+      <div className="actions">
         <button type="button" disabled={busy} onClick={() => newProfile()}>Добавить профессию</button>
         <button type="button" className="secondary" disabled={busy} onClick={() => void loadCandidates()}>Роли из интервью</button>
       </div>
@@ -255,6 +242,7 @@ export function Vacancies({ onSessionExpired }: { onSessionExpired: () => void }
     {selected && overview && <>
       <section className="panel" aria-label={`Выборка ${selected.title}`}>
         <h2>{selected.title}</h2>
+        <p className="meta">{selected.approved ? 'Включён для интервью' : 'Требует проверки редактора'}</p>
         <div className="vacancy-filters">
           <Filter id="market-experience" label="Опыт" choices={experiences} value={experience} onChange={setExperience}/>
           <Filter id="market-level" label="Уровень" choices={levels} value={level} onChange={setLevel}/>

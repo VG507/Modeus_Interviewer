@@ -1,7 +1,9 @@
 """Editorial workflow for synthesized knowledge cards."""
 
+import re
 from datetime import datetime
 from typing import Annotated, Generic, Literal, TypeVar
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -9,13 +11,17 @@ from pydantic import BaseModel, Field, StrictBool, StringConstraints, model_vali
 from sqlalchemy import func, select
 
 from backend.catalog_topics import catalog_topic_columns, profession_for_card
-from backend.db import CardEvent, KnowledgeCard, now
+from backend.db import CardEvent, KnowledgeCard, Message, now
+from backend.http_errors import MESSAGES
 from backend.interview_api import Actor, CommandKey, PageSize, utc, versioned_command
+from backend.interview_engine import GAPS_PREFIX, LABELS
 from backend.interview_schemas import FactField, Identifier, ShortText, VersionedRequest
+from backend.knowledge import SECTIONS, cases_of, fact_skills, published_cards
 from backend.pagination import newest_page
 
 router = APIRouter(prefix="/api/v1")
-SECTIONS = ("task", "context", "actions", "decisions", "verification", "errors", "limitations")
+MIN_REVIEW_ITEMS = 2
+REVIEW_HEADINGS = {label.casefold() for label in LABELS.values()}
 CardText = Annotated[str, StringConstraints(min_length=1, max_length=100_000)]
 Comment = Annotated[str, StringConstraints(strip_whitespace=True, max_length=4000)]
 AuthorName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
@@ -27,6 +33,7 @@ class FactEdit(BaseModel):
 
 
 class CaseEdit(BaseModel):
+    case_id: Identifier | None = Field(default=None, exclude_if=lambda value: value is None)
     title: ShortText
     task: list[FactEdit] = Field(default_factory=list, max_length=50)
     context: list[FactEdit] = Field(default_factory=list, max_length=50)
@@ -58,6 +65,7 @@ class SubmitCard(VersionedRequest):
     consent: StrictBool
     show_author: StrictBool
     author_name: AuthorName | None = None
+    share_evidence: StrictBool = Field(default=False, exclude_if=lambda value: not value)
 
     @model_validator(mode="after")
     def check_consent(self):
@@ -96,6 +104,7 @@ class CardView(BaseModel):
     author_name: str | None
     consent: dict | None
     review: dict | None
+    review_blocker: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -159,9 +168,41 @@ def accessible_card(db, card_id, actor, access="read"):
     raise HTTPException(404, "CARD_NOT_FOUND")
 
 
+def normalized_detail(text):
+    return " ".join(re.findall(r"[^\W_]+", text.casefold()))
+
+
+def has_review_content(content, text):
+    if "cases" in content or any(section in content for section in SECTIONS):
+        for case in [content, *(content.get("cases") or [])]:
+            sections = [{normalized_detail(fact["text"]) for fact in case.get(section, [])} - {""}
+                        for section in SECTIONS]
+            if (sum(bool(details) for details in sections) >= MIN_REVIEW_ITEMS
+                    and len(set().union(*sections)) >= MIN_REVIEW_ITEMS):
+                return True
+        return False
+
+    # Text-only revisions may retain headings and gap notices from the generated card.
+    ignored = REVIEW_HEADINGS | {normalized_detail(content["title"]), ""}
+    lines = [line.strip() for line in text.splitlines()]
+    details = set()
+    for index, line in enumerate(lines):
+        detail = normalized_detail(line)
+        if detail in ignored or line.casefold().startswith(GAPS_PREFIX.casefold()):
+            continue
+        next_section = lines[index + 1:index + 3]
+        if (not line.startswith("• ") and len(next_section) == 2 and not next_section[0]
+                and (next_section[1].casefold() in REVIEW_HEADINGS or next_section[1].startswith(GAPS_PREFIX))):
+            continue
+        details.add(detail)
+    return len(details) >= MIN_REVIEW_ITEMS
+
+
 def card_view(card):
     return CardView.model_validate({
-        **{field: getattr(card, field) for field in CardView.model_fields},
+        **{field: getattr(card, field) for field in CardView.model_fields if field != "review_blocker"},
+        "review_blocker": MESSAGES["CARD_INCOMPLETE"] if card.publication_status == "draft"
+        and not has_review_content(card.content, card.text) else None,
         "created_at": utc(card.created_at), "updated_at": utc(card.updated_at),
     })
 
@@ -200,6 +241,87 @@ def read_card(request: Request, response: Response, actor: Actor, card_id: Ident
         }
 
 
+def find_fact(content, fact_id):
+    return next(((fact, section) for case in cases_of(content) for section in SECTIONS
+                 for fact in case.get(section, ()) if fact.get("id") == fact_id), (None, None))
+
+
+def evidence_source(question):
+    for source in question.market_sources or ():
+        if not source.get("used"):
+            continue
+        title, url, quote = (source.get(key) for key in ("title", "url", "task_excerpt"))
+        if not all(isinstance(value, str) and value for value in (title, url, quote)):
+            continue
+        try:
+            address = urlsplit(url)
+            if (address.scheme in {"https", "http"} and address.hostname and address.username is None
+                    and not any(char.isspace() or char == "\\" for char in url)):
+                return {"title": title, "url": url, "quote": quote}
+        except ValueError:
+            continue
+    return None
+
+
+@router.get("/cards/{card_id}/facts/{fact_id}/evidence")
+def read_fact_evidence(request: Request, response: Response, actor: Actor, card_id: Identifier, fact_id: Identifier):
+    response.headers["Cache-Control"] = "no-store"
+    with request.app.state.sessions() as db:
+        card = accessible_card(db, card_id, actor)
+        owner = card.owner_id == actor["id"]
+        if not owner and not (card.publication_status in {"in_review", "published"}
+                              and matches_version(card.consent, card) and card.consent.get("share_evidence") is True):
+            raise HTTPException(404, "CARD_NOT_FOUND")
+        fact, section = find_fact(card.content, fact_id)
+        history = []
+        if (owner and fact is None) or (fact and fact.get("derived_from_fact_id")):
+            snapshots = db.scalars(select(CardEvent.details).where(
+                CardEvent.card_id == card.id, CardEvent.action == "edit",
+            ).order_by(CardEvent.version.desc()))
+            history = [snapshot["previous"]["content"] for snapshot in snapshots]
+        if owner and fact is None:
+            for snapshot in history:
+                fact, section = find_fact(snapshot, fact_id)
+                if fact is not None:
+                    break
+        if fact is None:
+            raise HTTPException(404, "CARD_NOT_FOUND")
+        original = fact if fact.get("source", "interview") == "interview" else None
+        original_id = fact.get("derived_from_fact_id")
+        if original is None and original_id:
+            for snapshot in history:
+                prior, prior_section = find_fact(snapshot, original_id)
+                if prior and prior_section == section and prior.get("source", "interview") == "interview":
+                    original = prior
+                    break
+
+        turns = []
+        if original:
+            ids = original.get("supporting_message_ids", ())
+            answers = db.scalars(select(Message).where(
+                Message.session_id == card.session_id, Message.id.in_(ids),
+                Message.kind == "answer", Message.status == "processed",
+            ).order_by(Message.sequence))
+            for answer in answers:
+                quote = original["text"]
+                if " ".join(quote.split()) not in " ".join((answer.text or "").split()):
+                    continue
+                if answer.extraction is not None and not any(
+                    item.get("id") == original.get("id") and item.get("text") == quote
+                    for item in answer.extraction.get("facts", ())
+                ):
+                    continue
+                question = db.get(Message, answer.reply_to_question_id) if answer.reply_to_question_id else None
+                if (question is None or question.session_id != card.session_id or question.kind != "question"
+                        or question.sequence >= answer.sequence or not question.text):
+                    continue
+                turns.append({"question_id": question.id if owner else None,
+                              "answer_id": answer.id if owner else None, "question": question.text,
+                              "answer_quote": quote, "source": evidence_source(question)})
+        return {"original_text": original["text"] if original and original is not fact else None,
+                "skills": fact_skills(original, section) if turns and original is fact else [], "turns": turns}
+
+
 def write_card(request, actor, key, card_id, body, access, apply):
     def load(db):
         return accessible_card(db, card_id, actor, access)
@@ -231,6 +353,10 @@ def reconcile_case(edited, previous, event_id):
                 content[name].append({
                     "id": str(uuid4()), "text": fact.text, "source": "owner_edit",
                     "supporting_message_ids": [], "edit_id": event_id,
+                    **({"derived_from_fact_id": prior["id"] if prior.get("source", "interview") == "interview"
+                        else prior["derived_from_fact_id"]}
+                       if prior and (prior.get("source", "interview") == "interview"
+                                     or prior.get("derived_from_fact_id")) else {}),
                 })
     return content
 
@@ -239,10 +365,20 @@ def reconcile_content(edited, previous, event_id):
     content = reconcile_case(edited, previous, event_id)
     if edited.cases is not None:
         old_cases = previous.get("cases", [])
-        content["cases"] = [
-            reconcile_case(case, old_cases[index] if index < len(old_cases) else {}, event_id)
-            for index, case in enumerate(edited.cases)
-        ]
+        by_id = {case["case_id"]: case for case in old_cases if case.get("case_id")}
+        legacy = {index: case for index, case in enumerate(old_cases) if not case.get("case_id")}
+        legacy_facts = {(section, fact["id"]): index for index, case in legacy.items()
+                        for section in SECTIONS for fact in case.get(section, ()) if fact.get("id")}
+        content["cases"] = []
+        for case in edited.cases:
+            prior = by_id.pop(case.case_id, None)
+            if prior is None and case.case_id is None:
+                matches = {legacy_facts[key] for section in SECTIONS for fact in getattr(case, section)
+                           if (key := (section, fact.id)) in legacy_facts}
+                if len(matches) == 1:
+                    prior = legacy.pop(matches.pop(), None)
+            content["cases"].append({**reconcile_case(case, prior or {}, event_id),
+                                     "case_id": (prior or {}).get("case_id") or str(uuid4())})
     return content
 
 
@@ -283,13 +419,16 @@ def submit_card(request: Request, actor: Actor, key: CommandKey, card_id: Identi
     def apply(card, stamp, event_id):
         if card.publication_status != "draft":
             raise HTTPException(409, "INVALID_STATE")
+        if not has_review_content(card.content, card.text):
+            raise HTTPException(422, "CARD_INCOMPLETE")
         author_name = (body.author_name or "Участник Modeus") if body.show_author else None
         if (card.show_author, card.author_name) != (body.show_author, author_name):
             card.content_version += 1
         card.show_author, card.author_name = body.show_author, author_name
         card.first_submitted_at = card.first_submitted_at or stamp
         card.publication_status, card.review_status = "in_review", "unreviewed"
-        card.consent = decision_metadata(card, actor, stamp, show_author=card.show_author, author_name=card.author_name)
+        card.consent = decision_metadata(card, actor, stamp, show_author=card.show_author,
+                                         author_name=card.author_name, share_evidence=body.share_evidence)
         card.review = None
         return "submit_review", card.consent
 
@@ -324,15 +463,6 @@ def unpublish_card(request: Request, actor: Actor, key: CommandKey, card_id: Ide
         return "unpublish", card.review
 
     return write_card(request, actor, key, card_id, body, "editorship", apply)
-
-
-def published_cards():
-    return select(KnowledgeCard).where(
-        KnowledgeCard.publication_status == "published", KnowledgeCard.review_status == "reviewed",
-        KnowledgeCard.consent["content_version"].as_integer() == KnowledgeCard.content_version,
-        KnowledgeCard.review["content_version"].as_integer() == KnowledgeCard.content_version,
-        KnowledgeCard.review["decision"].as_string() == "accept",
-    )
 
 
 def public_summary(card, topic_title, topic_profession):

@@ -3,7 +3,7 @@ import { api, ApiError, describe } from './api';
 
 const sources = {
   hh: 'Вакансии HH', github: 'GitHub Issues', trends: 'GitHub Trends',
-  docs: 'Официальная документация', hn: 'Hacker News', openalex: 'Научные статьи',
+  docs: 'Официальная документация', hn: 'Hacker News', openalex: 'Научные статьи', skills: 'Agent Skills',
 } as const;
 type Source = keyof typeof sources;
 type Step = {
@@ -16,7 +16,8 @@ type Run = { id: string; running: boolean; steps: Partial<Record<Source, Step>> 
 type Quality = {
   hh: { checked_at: string | null; vacancies: number; employers: number; fresh: boolean; approved: boolean;
     current_config: boolean; source: string | null };
-  materials: Record<'github' | 'trends' | 'docs', Record<string, number>> & { openalex?: Record<string, number> };
+  materials: Record<'github' | 'trends' | 'docs', Record<string, number>> &
+    { openalex?: Record<string, number>; skills?: Record<string, number> };
   automatic_check_enabled: boolean;
 };
 type Status = { run: Run | null; quality: Quality };
@@ -39,6 +40,8 @@ const messages: Record<string, string> = {
   OPENALEX_UPSTREAM: 'Один из сервисов проверки статьи недоступен.',
   OPENALEX_ANALYSIS_FAILED: 'Модель не завершила проверку выдержки.',
   OPENALEX_RESPONSE_TOO_LARGE: 'Ответ источника превысил допустимый размер.',
+  SKILLS_NOT_CONFIGURED: 'Для пилота подключены профили QA и Python backend.',
+  SKILLS_ANALYSIS_FAILED: 'Модель не завершила проверку одного из скиллов.',
   DISCOVERY_RATE_LIMIT: 'Источник ограничил число запросов.',
   DISCOVERY_TIMEOUT: 'Источник не ответил вовремя.',
   DISCOVERY_UNAVAILABLE: 'Источник недоступен или вернул неожиданный ответ.',
@@ -47,10 +50,10 @@ const retryable = new Set(['partial', 'failed', 'busy', 'interrupted']);
 
 function QualitySummary({ quality }: { quality: Quality }) {
   const { hh, materials } = quality;
-  const { github, docs, trends, openalex: research } = materials;
+  const { github, docs, trends, openalex: research, skills } = materials;
   const hhDate = hh.checked_at && new Date(hh.checked_at).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' });
   return <ul>
-    <li><a href="#/vacancies">Вакансии HH</a>{hhDate ? <>
+    <li><a href="#/data/vacancies">Вакансии HH</a>{hhDate ? <>
       {' · выборка от '}{hhDate} · {hh.vacancies} вакансий, {hh.employers} работодателей
       {' · '}{hh.fresh ? 'свежая' : 'срок актуальности истёк'}
       {!(hh.approved && hh.current_config) && ' · профиль или выборка требуют проверки'}
@@ -66,6 +69,8 @@ function QualitySummary({ quality }: { quality: Quality }) {
     <li>GitHub Trends · {trends.observe ?? 0} сигналов популярности. Hacker News · кандидаты по технологиям и активности обсуждения.</li>
     {research && <li>Научные статьи · допущено {research.accepted ?? 0} · кандидаты {(research.new ?? 0) + (research.observe ?? 0)}
       {' · отклонено или просрочено '}{(research.rejected ?? 0) + (research.expired ?? 0)}</li>}
+    {skills && <li>Agent Skills · допущено {skills.accepted ?? 0} · наблюдение {(skills.new ?? 0) + (skills.observe ?? 0)}
+      {' · отклонено или устарело '}{(skills.rejected ?? 0) + (skills.expired ?? 0)}</li>}
   </ul>;
 }
 

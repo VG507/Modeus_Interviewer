@@ -8,6 +8,7 @@ import httpx
 from pydantic import ValidationError
 from sqlalchemy import delete, select
 
+from backend.agent_skills import collect_skills
 from backend.db import LoginSession, User, VacancyCollection, database
 from backend.discovery import candidate_output, collect, item_entry, list_candidates
 from backend.discovery_fetch import CollectionError
@@ -29,6 +30,8 @@ DISCOVERY_COMMANDS = {"fetch-github": "github", "fetch-trends": "trends"}
 def discovery_command(args, settings):
     engine, sessions = database(settings.database_url)
     try:
+        if args.command == "fetch-skills":
+            return collect_skills(sessions, settings, args.profession_id)
         if args.command == "fetch-openalex":
             return collect_research(sessions, settings, args.profession_id, overrides=args.query or ())
         if args.command == "fetch-hn":
@@ -88,6 +91,8 @@ def main():
     research = sub.add_parser("fetch-openalex", help="Collect and verify scholarly articles for one profession")
     research.add_argument("profession_id")
     research.add_argument("--query", action="append", help="Search by a practical task (up to four queries)")
+    skills = sub.add_parser("fetch-skills", help="Collect and verify curated Agent Skills")
+    skills.add_argument("profession_id")
     hn = sub.add_parser("fetch-hn", help="Collect IT stories and comments from Hacker News")
     hn.add_argument("profession_id", nargs="?")
     hn.add_argument("--technology", action="append", default=[], help="Add a technology to the selected profile")
@@ -111,12 +116,12 @@ def main():
     args = parser.parse_args()
     settings = Settings()
     if args.command in DISCOVERY_COMMANDS or args.command in {
-        "fetch-docs", "fetch-hn", "fetch-openalex", "list-discovery",
+        "fetch-docs", "fetch-hn", "fetch-openalex", "fetch-skills", "list-discovery",
     }:
         try:
             result = discovery_command(args, settings)
             print(json.dumps(result, ensure_ascii=True, default=str))
-            if args.command == "fetch-openalex" and result["status"] in {"failed", "skipped"}:
+            if args.command in {"fetch-openalex", "fetch-skills"} and result["status"] in {"failed", "skipped"}:
                 raise SystemExit(1)
         except HackerNewsUnavailable as exc:
             parser.exit(1, f"fetch-hn: {exc}\n")

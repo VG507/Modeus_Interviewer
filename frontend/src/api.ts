@@ -25,15 +25,22 @@ export type Interview = {
 export type Detail = Interview & { messages: Message[] };
 export type AnswerResult = { interview: Interview; answer: Message };
 export type CardGap = 'task' | 'context' | 'action' | 'decision' | 'verification' | 'error' | 'limitation';
-export type CardContent = { title: string; cases?: CardContent[]; unknown_fields?: CardGap[] } & Partial<Record<
+export type CardFact = { id?: string; text: string; skills?: string[]; derived_from_fact_id?: string };
+export type CardEvidence = {
+  original_text: string | null; skills: string[];
+  turns: { question: string; answer_quote: string; source: Message['source_quote'] }[];
+};
+export type CardContent = { title: string; case_id?: string; cases?: CardContent[]; unknown_fields?: CardGap[] } & Partial<Record<
   'task' | 'context' | 'actions' | 'decisions' | 'verification' | 'errors' | 'limitations',
-  { text: string }[]
+  CardFact[]
 >>;
 export type Card = {
   id: string; session_id: string; owner_id: string; version: number; content_version: number;
   text: string; content: CardContent; show_author: boolean; author_name: string | null;
   publication_status: 'draft' | 'in_review' | 'published';
   review_status: 'unreviewed' | 'needs_changes' | 'reviewed';
+  review_blocker: string | null;
+  consent: { share_evidence?: boolean } | null;
   review: { decision: 'accept' | 'return' | 'keep_private' | 'unpublish'; comment: string } | null;
 };
 export type CardDetail = Card & {

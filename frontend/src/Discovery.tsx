@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, describe } from './api';
 import { DocumentationReview, DocumentationSettings } from './Documentation';
-import { ProfessionCollection } from './ProfessionCollection';
 
 const searchProviders = { github: 'GitHub Issues', trends: 'GitHub Trends' } as const;
-const providers = { ...searchProviders, docs: 'Официальная документация', openalex: 'Научные статьи' } as const;
+const providers = { ...searchProviders, docs: 'Официальная документация', openalex: 'Научные статьи', skills: 'Agent Skills' } as const;
 type Provider = keyof typeof providers;
 const statuses: Record<string, string> = {
   new: 'Новый', review: 'На проверке', accepted: 'Допущен к интервью', observe: 'Наблюдаем',
@@ -15,7 +14,6 @@ const searchFields = {
   github: { label: 'Репозитории', example: 'facebook/react, vitejs/vite' },
   trends: { label: 'Темы GitHub', example: 'react, frontend, vite' },
 };
-type Profile = { id: string; title: string };
 type Item = {
   id: string; digest: string; title: string; url: string; provider: Provider; observed_at: string; status: string; reason: string | null;
   weekly_star_change?: number | null;
@@ -36,6 +34,7 @@ type ItemDetail = Item & {
     kind?: string; reason?: string; supported?: boolean | null;
     doi?: string; venue?: string; authors?: string[]; publication_date?: string; review_url?: string;
     crossref_checked?: boolean; full_text_sha256?: string; published_licenses?: string[];
+    repository?: string; commit?: string; license?: string; dependencies?: string[];
   };
 };
 
@@ -54,6 +53,25 @@ function fragmentLabel(key: string) {
 
 function Detail({ item }: { item: ItemDetail }) {
   const data = item.payload;
+  if (item.provider === 'skills') {
+    const evidence = item.assessment as (ItemDetail['assessment'] & {
+      inputs?: string; output?: string; verification?: string; human_check?: string; limitation?: string;
+    });
+    const fields = [
+      ['Входные данные', evidence?.inputs], ['Результат', evidence?.output], ['Проверка результата', evidence?.verification],
+      ['Участие человека', evidence?.human_check], ['Ограничение', evidence?.limitation],
+    ];
+    return <div className="stack">
+      <p className="meta">{[data.repository, data.commit?.slice(0, 8), data.license].filter(Boolean).join(' · ')}</p>
+      {data.description && <p>{data.description}</p>}
+      {item.reason && <p>{item.reason}</p>}
+      {evidence?.task && <p><strong>Рабочая задача</strong> {evidence.task}</p>}
+      {fields.filter(([, value]) => value).map(([label, value]) => <details key={label} open={label === 'Проверка результата'}>
+        <summary>{label}</summary><p className="discovery-fragment">{value}</p>
+      </details>)}
+      {!!data.dependencies?.length && <p className="meta">Упомянутые файлы · {data.dependencies.join(', ')}</p>}
+    </div>;
+  }
   if (item.provider === 'openalex') {
     const evidence = item.assessment;
     const excerpts = [
@@ -108,9 +126,9 @@ function Detail({ item }: { item: ItemDetail }) {
   </div>;
 }
 
-export function Discovery({ onSessionExpired }: { onSessionExpired: () => void }) {
-  const [profiles, setProfiles] = useState<Profile[] | null>(null);
-  const [profession, setProfession] = useState('');
+export function Discovery({ profession, collectionRefresh, onSessionExpired }: {
+  profession: string; collectionRefresh: number; onSessionExpired: () => void;
+}) {
   const [provider, setProvider] = useState<Provider | ''>('');
   const [offset, setOffset] = useState(0);
   const [page, setPage] = useState<ItemPage | null>(null);
@@ -124,20 +142,8 @@ export function Discovery({ onSessionExpired }: { onSessionExpired: () => void }
   const [collectionError, setCollectionError] = useState('');
   const [collecting, setCollecting] = useState(false);
   const collectionRequest = useRef<AbortController | null>(null);
-  const refreshMaterials = useCallback(() => setReload(value => value + 1), []);
 
   useEffect(() => () => collectionRequest.current?.abort(), []);
-
-  useEffect(() => {
-    const { signal, abort } = controller();
-    api<Profile[]>('/discovery/profiles', { signal }).then(result => {
-      if (signal.aborted) return;
-      setProfiles(result);
-      setProfession(current => result.some(profile => profile.id === current) ? current :
-        result.find(profile => profile.id === 'python_backend')?.id ?? result[0]?.id ?? '');
-    }).catch(problem => handle(problem, signal, setError, onSessionExpired));
-    return abort;
-  }, [onSessionExpired, reload]);
 
   useEffect(() => {
     if (!profession) return;
@@ -145,20 +151,26 @@ export function Discovery({ onSessionExpired }: { onSessionExpired: () => void }
     const query = new URLSearchParams({ profession_id: profession, offset: String(offset), limit: String(pageSize) });
     if (provider) query.set('provider', provider);
     api<ItemPage>(`/discovery?${query}`, { signal }).then(result => {
-      if (!signal.aborted) setPage(result);
+      if (!signal.aborted) {
+        setPage(result);
+        setError('');
+      }
     }).catch(problem => handle(problem, signal, setError, onSessionExpired));
     return abort;
-  }, [profession, provider, offset, reload, onSessionExpired]);
+  }, [profession, provider, offset, reload, collectionRefresh, onSessionExpired]);
 
   useEffect(() => {
     if (!selected || !profession) return;
     const { signal, abort } = controller();
     const query = new URLSearchParams({ profession_id: profession });
     api<ItemDetail>(`/discovery/items/${encodeURIComponent(selected)}?${query}`, { signal }).then(result => {
-      if (!signal.aborted) setDetail(result);
+      if (!signal.aborted) {
+        setDetail(result);
+        setDetailError('');
+      }
     }).catch(problem => handle(problem, signal, setDetailError, onSessionExpired));
     return abort;
-  }, [selected, profession, reload, onSessionExpired]);
+  }, [selected, profession, reload, collectionRefresh, onSessionExpired]);
 
   const awaitingAutomaticCheck = page?.items.some(item => item.status === 'automatic_check');
   useEffect(() => {
@@ -211,15 +223,7 @@ export function Discovery({ onSessionExpired }: { onSessionExpired: () => void }
   }
 
   return <section className="stack">
-    <h1>Источники</h1>
     <div className="panel vacancy-filters">
-      <label>Профессия <select value={profession} disabled={collecting || !profiles?.length} onChange={event => {
-        showPage(0); setProfession(event.target.value);
-        setCollectionResult(''); setCollectionError('');
-      }}>
-        {!profiles?.length && <option value="">Нет профилей</option>}
-        {profiles?.map(profile => <option key={profile.id} value={profile.id}>{profile.title || profile.id}</option>)}
-      </select></label>
       <label>Источник <select value={provider} onChange={event => {
         showPage(0); setProvider(event.target.value as Provider | '');
       }}>
@@ -228,10 +232,8 @@ export function Discovery({ onSessionExpired }: { onSessionExpired: () => void }
       </select></label>
       <button className="secondary" onClick={() => { showPage(0); setReload(value => value + 1); }}>Обновить</button>
     </div>
-    {profession && <ProfessionCollection key={profession} profession={profession}
-      onSessionExpired={onSessionExpired} onCompleted={refreshMaterials}/>}
     <form className="panel" onSubmit={collectForProfession}>
-      <h2>Сбор для выбранной профессии</h2>
+      <h2>Поиск в GitHub</h2>
       <fieldset className="vacancy-filters" disabled={collecting || !profession}>
         <label>Сборщик <select value={collectionSource} onChange={event => {
           setCollectionSource(event.target.value as keyof typeof searchProviders); setCollectionResult(''); setCollectionError('');
@@ -250,13 +252,13 @@ export function Discovery({ onSessionExpired }: { onSessionExpired: () => void }
       {collectionError && <p role="alert">{collectionError}</p>}
       {collectionResult && <p role="status">{collectionResult}</p>}
     </form>
-    {profession && <details className="panel">
+    <details className="panel">
       <summary>Мониторинг официальной документации</summary>
       <DocumentationSettings key={profession} profession={profession} refresh={reload} onSessionExpired={onSessionExpired}
         onCollected={() => { setProvider('docs'); showPage(0); setReload(value => value + 1); }}/>
-    </details>}
+    </details>
     {error && <p role="alert">{error}</p>}
-    {!error && !page && (profiles === null || profession) && <p role="status">Загружаем материалы…</p>}
+    {!error && !page && <p role="status">Загружаем материалы…</p>}
     {page && !page.items.length && <p>По выбранным фильтрам материалов пока нет.</p>}
     {page?.items.map(item => <article className="panel" key={item.id}>
       <p className="meta">{providers[item.provider]} · {statuses[item.status] ?? item.status} · Собрано {date(item.observed_at)}

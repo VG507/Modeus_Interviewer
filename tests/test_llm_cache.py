@@ -27,6 +27,10 @@ def provider(tmp_path, monkeypatch):
         body = json.loads(request.content)
         requests.append(body)
         content = answers.pop(0) if answers else {"text": f"ответ {len(requests)}"}
+        if isinstance(content, Exception):
+            raise content
+        if isinstance(content, int):
+            return httpx.Response(content)
         return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(content)}}]})
 
     real_client = httpx.AsyncClient
@@ -70,11 +74,31 @@ def test_rejected_answer_is_asked_again(provider):
             raise ValueError("not a question")
         return raw["text"]
 
-    with pytest.raises(ValueError):
-        ask(settings(), parse=question)
+    # The malformed answer is asked again at once, and only the good one is stored.
     assert ask(settings(), parse=question) == "Что вы сделали?"
     assert ask(settings(), parse=question) == "Что вы сделали?"
     assert len(requests) == 2
+    answers.extend([{"text": "нет"}, {"text": "снова нет"}])
+    with pytest.raises(ValueError):
+        ask(settings(), instructions="Задай другой вопрос.", parse=question)
+    assert len(requests) == 4
+
+
+@pytest.mark.parametrize("failure", [httpx.ConnectError("refused"), 503, 429])
+def test_dropped_connection_or_busy_provider_is_asked_once_more(provider, failure):
+    settings, requests, answers = provider
+    answers.extend([failure, {"text": "Что вы сделали?"}])
+    assert ask(settings()) == {"text": "Что вы сделали?"}
+    assert len(requests) == 2
+
+
+@pytest.mark.parametrize("failure, error", [(httpx.ReadTimeout("slow"), httpx.ReadTimeout), (400, RuntimeError)])
+def test_timeout_and_bad_request_are_not_repeated(provider, failure, error):
+    settings, requests, answers = provider
+    answers.extend([failure, {"text": "Что вы сделали?"}])
+    with pytest.raises(error):
+        ask(settings())
+    assert len(requests) == 1
 
 
 def test_cache_can_be_turned_off_and_check_llm_always_reaches_the_model(provider):

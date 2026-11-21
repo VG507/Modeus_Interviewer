@@ -46,11 +46,39 @@ def remember_response(settings, key, response):
         return db.scalar(select(LlmResponse.response).where(LlmResponse.key == key))
 
 
+RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+
+def retryable(exc):
+    """A dropped connection, a busy provider or a malformed answer is asked once more.
+
+    A timeout is not: it has already used the time the interview step has.
+    """
+    if isinstance(exc, httpx.TimeoutException):
+        return False
+    if isinstance(exc, (httpx.TransportError, ValueError)):
+        return True
+    return str(exc) == "LLM_INVALID_RESPONSE" or str(exc) in {f"LLM_HTTP_ERROR: {code}" for code in RETRYABLE_STATUS}
+
+
+async def completion_json(settings, headers, local, body):
+    async with httpx.AsyncClient(timeout=settings.llm_timeout_seconds, trust_env=not local) as client:
+        response = await client.post(settings.llm_base_url.rstrip("/") + "/chat/completions",
+                                     headers=headers, json=body)
+    if response.status_code != 200:
+        raise RuntimeError(f"LLM_HTTP_ERROR: {response.status_code}")
+    try:
+        return json.loads(response.json()["choices"][0]["message"]["content"])
+    except (ValueError, KeyError, IndexError, TypeError):
+        raise RuntimeError("LLM_INVALID_RESPONSE") from None
+
+
 async def structured_completion(settings: Settings, name: str, schema: dict,
                                 instructions: str, payload: dict, *, parse=None, cache=True):
     """Return the model's JSON, or parse(JSON) when given.
 
     Only answers that parse are cached, so a rejected answer is asked again on retry.
+    A malformed answer, a dropped connection or a busy provider is asked once more right away.
     """
     if not settings.llm_base_url or not settings.llm_model:
         raise RuntimeError("LLM_NOT_CONFIGURED: set LLM_BASE_URL and LLM_MODEL in .env")
@@ -71,22 +99,21 @@ async def structured_completion(settings: Settings, name: str, schema: dict,
         stored = cached_response(settings, key)
         if stored is not None:
             return parse(stored)
-    async with httpx.AsyncClient(timeout=settings.llm_timeout_seconds, trust_env=not local) as client:
-        response = await client.post(settings.llm_base_url.rstrip("/") + "/chat/completions",
-            headers=headers, json={"model": settings.llm_model, **options,
-                "messages": [
-                    {"role": "system", "content": instructions},
-                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-                ],
-                "response_format": {"type": "json_schema", "json_schema": {
-                    "name": name, "strict": True, "schema": schema}}})
-    if response.status_code != 200:
-        raise RuntimeError(f"LLM_HTTP_ERROR: {response.status_code}")
-    try:
-        raw = json.loads(response.json()["choices"][0]["message"]["content"])
-    except (ValueError, KeyError, IndexError, TypeError):
-        raise RuntimeError("LLM_INVALID_RESPONSE") from None
-    result = parse(raw)
+    body = {"model": settings.llm_model, **options,
+            "messages": [
+                {"role": "system", "content": instructions},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            "response_format": {"type": "json_schema", "json_schema": {
+                "name": name, "strict": True, "schema": schema}}}
+    for attempt in range(2):
+        try:
+            raw = await completion_json(settings, headers, local, body)
+            result = parse(raw)
+            break
+        except (RuntimeError, ValueError, httpx.TransportError) as exc:
+            if attempt or not retryable(exc):
+                raise
     return parse(remember_response(settings, key, raw)) if cache else result
 
 

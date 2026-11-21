@@ -320,6 +320,14 @@ class VacancySnapshot(Base):
     cards: Mapped[list | None] = mapped_column(JSON)
 
 
+class LlmResponse(Base):
+    __tablename__ = "llm_responses"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    model: Mapped[str] = mapped_column(String(200))
+    response: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
 def database(url):
     options = {"check_same_thread": False} if url.startswith("sqlite:") else {}
     engine = create_engine(url, connect_args=options, pool_pre_ping=True)

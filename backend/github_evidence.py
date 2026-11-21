@@ -105,6 +105,7 @@ async def extract_evidence(settings, item, profile_id, profession):
     result = await asyncio.wait_for(structured_completion(
         settings, "github_issue_evidence", IssueEvidence.model_json_schema(), instructions,
         {"profession": profession, "title": item.title, "repository": payload.get("repo"), "fragments": excerpts},
+        parse=IssueEvidence.model_validate,
     ), timeout=settings.llm_timeout_seconds)
     evidence = IssueEvidence.model_validate(result)
     fix = fixes.get(evidence.resolution_fragment)

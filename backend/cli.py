@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from sqlalchemy import delete, select
 
 from backend.agent_skills import collect_skills
-from backend.db import LoginSession, User, VacancyCollection, database
+from backend.db import LlmResponse, LoginSession, User, VacancyCollection, database
 from backend.discovery import candidate_output, collect, item_entry, list_candidates
 from backend.discovery_fetch import CollectionError
 from backend.documentation import collect_documentation
@@ -81,6 +81,8 @@ def main():
     invite.add_argument("email")
     invite.add_argument("--hours", type=number_between(1, 720), default=INVITE_HOURS)
     sub.add_parser("check-llm")
+    forget = sub.add_parser("clear-llm-cache", help="Forget stored model answers so the model is asked again")
+    forget.add_argument("--model", help="Only answers of this model")
     collect = sub.add_parser("import-vacancies", help="Refresh HH vacancies for one profile")
     collect.add_argument("profession_id")
     collect.add_argument("--file", type=Path, help="Import a JSON array of saved detailed HH responses")
@@ -137,6 +139,18 @@ def main():
             # No exception body from HTTP clients: URLs may include credentials.
             print(str(exc) if type(exc) is RuntimeError else type(exc).__name__)
             raise SystemExit(1) from None
+        return
+    if args.command == "clear-llm-cache":
+        engine, sessions = database(settings.database_url)
+        try:
+            with sessions.begin() as db:
+                query = delete(LlmResponse)
+                if args.model:
+                    query = query.where(LlmResponse.model == args.model)
+                count = db.execute(query).rowcount
+        finally:
+            engine.dispose()
+        print(json.dumps({"deleted": count}))
         return
     if args.command == "telegram-invite":
         engine, sessions = database(settings.database_url)

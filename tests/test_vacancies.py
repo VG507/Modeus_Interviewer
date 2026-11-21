@@ -221,7 +221,7 @@ def test_reviewed_sources_require_applicability_and_rank_by_purpose(tmp_path, mo
     ("Как изменили план? Что проверили?", 1, None),
 ])
 def test_question_trace_requires_a_valid_model_reference(monkeypatch, text, number, expected):
-    async def model(settings, schema, instructions, payload):
+    async def model(settings, schema, instructions, payload, check=None):
         assert schema is interview_engine.SourcedQuestion
         assert payload["market_context"][0]["number"] == 1
         return schema(text=text, source_number=number)
@@ -238,7 +238,7 @@ def test_paired_question_evaluation_changes_only_the_quote(monkeypatch):
 
     requests = []
 
-    async def model(settings, schema, instructions, payload):
+    async def model(settings, schema, instructions, payload, check=None):
         requests.append((schema, instructions, payload))
         return schema(text="Как проверили результат?", source_number=1 if payload["market_context"] else None)
 
@@ -351,7 +351,7 @@ def test_latest_vacancy_sample_reaches_question_but_not_card(tmp_path, monkeypat
     action = "Я переписал SQL-запрос."
     observed = []
 
-    async def model(settings, schema, instructions, payload):
+    async def model(settings, schema, instructions, payload, check=None):
         if schema is interview_engine.DiscoverySelection:
             assert "market_context" not in payload
             return schema(facts=[{"field": "task", "sentence": 1}, {"field": "action", "sentence": 2}],
@@ -360,9 +360,7 @@ def test_latest_vacancy_sample_reaches_question_but_not_card(tmp_path, monkeypat
         if schema is interview_engine.SourcedQuestion:
             observed.extend(payload["market_context"])
             return schema(text="Что в плане выполнения повлияло на ваш выбор?", source_number=1)
-        assert schema is interview_engine.SummaryOrder
-        assert "market_context" not in payload
-        return schema(fact_numbers=[1, 2])
+        raise AssertionError(f"unexpected model call: {schema.__name__}")
 
     monkeypatch.setattr(interview_engine, "ask_model", model)
     with TestClient(app) as client:

@@ -313,6 +313,7 @@ def evidence_outcome(settings, item, profession, title, queries):
             "Use short continuous passages. Include the actual technology and version if explicit, otherwise null. "
             "Do not generalize the result beyond the measured setup. For irrelevant use empty fields and nulls.",
             {"profession": title, "tasks": queries, "title": item.title, "sections": sections},
+            parse=ResearchEvidence.model_validate,
         ), timeout=min(settings.llm_timeout_seconds, 60))
 
     evidence = ResearchEvidence.model_validate(asyncio.run(extract()))

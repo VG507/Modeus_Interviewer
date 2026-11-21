@@ -1,4 +1,4 @@
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Literal
 from urllib.parse import urlsplit
@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     llm_api_key: str = Field(default="", repr=False)
     llm_timeout_seconds: int = Field(default=45, ge=1, le=120)
     llm_reasoning_effort: Literal["", "none", "low", "medium", "high"] = ""
+    llm_temperature: float | None = Field(default=0, ge=0, le=2)
+    llm_seed: int | None = None
+    llm_cache: bool = True
     hh_user_agent: str = ""
     hh_access_token: str = Field(default="", repr=False)
     hh_client_id: str = Field(default="", repr=False)
@@ -28,6 +31,12 @@ class Settings(BaseSettings):
     telegram_bot_token: str = Field(default="", repr=False)
     telegram_api_url: str = "https://api.telegram.org"
     telegram_open_signup: bool = False
+
+    @field_validator("llm_temperature", "llm_seed", mode="before")
+    @classmethod
+    def empty_means_unset(cls, value):
+        # An empty value in .env leaves the provider default.
+        return None if value == "" else value
 
     @property
     def origin_list(self):

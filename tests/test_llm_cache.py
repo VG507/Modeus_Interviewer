@@ -16,8 +16,8 @@ SCHEMA = {"type": "object", "properties": {"text": {"type": "string"}}, "require
 
 
 @pytest.fixture
-def provider(tmp_path, monkeypatch):
-    url = f"sqlite:///{(tmp_path / 'llm.db').as_posix()}"
+def provider(database_url, monkeypatch):
+    url = database_url
     monkeypatch.setenv("DATABASE_URL", url)
     command.upgrade(Config("alembic.ini"), "head")
     requests = []

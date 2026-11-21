@@ -20,8 +20,8 @@ TASK = {**FACT, "id": "task-1", "text": "Ускорить формировани
 
 
 @pytest.fixture
-def publication(tmp_path, monkeypatch):
-    url = f"sqlite:///{(tmp_path / 'publication.db').as_posix()}"
+def publication(database_url, monkeypatch):
+    url = database_url
     monkeypatch.setenv("DATABASE_URL", url)
     command.upgrade(Config("alembic.ini"), "head")
     app = create_app(Settings(database_url=url, app_origin=ORIGIN))

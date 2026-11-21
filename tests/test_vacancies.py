@@ -32,8 +32,8 @@ def vacancy(vacancy_id="123", **overrides):
     }
 
 
-def test_hh_lease_is_renewed_by_progress_and_expired_runs_can_be_reclaimed(tmp_path, monkeypatch):
-    url = f"sqlite:///{(tmp_path / 'leases.db').as_posix()}"
+def test_hh_lease_is_renewed_by_progress_and_expired_runs_can_be_reclaimed(database_url, monkeypatch):
+    url = database_url
     monkeypatch.setenv("DATABASE_URL", url)
     command.upgrade(Config("alembic.ini"), "head")
     engine, sessions = database(url)
@@ -97,8 +97,8 @@ def test_hh_request_reports_distinct_failures(monkeypatch, path, status, code):
             HeadHunter(client, None).request("GET", path)
 
 
-def test_hh_request_interval_is_shared_between_collectors(tmp_path, monkeypatch):
-    url = f"sqlite:///{(tmp_path / 'interval.db').as_posix()}"
+def test_hh_request_interval_is_shared_between_collectors(database_url, monkeypatch):
+    url = database_url
     monkeypatch.setenv("DATABASE_URL", url)
     command.upgrade(Config("alembic.ini"), "head")
     first_engine, first = database(url)
@@ -174,8 +174,8 @@ def test_task_relevance_beats_stack_overlap():
     assert result[0]["source_field"] == "description"
 
 
-def test_reviewed_sources_require_applicability_and_rank_by_purpose(tmp_path, monkeypatch):
-    url = f"sqlite:///{(tmp_path / 'sources.db').as_posix()}"
+def test_reviewed_sources_require_applicability_and_rank_by_purpose(database_url, monkeypatch):
+    url = database_url
     monkeypatch.setenv("DATABASE_URL", url)
     command.upgrade(Config("alembic.ini"), "head")
     engine, sessions = database(url)
@@ -255,8 +255,8 @@ def test_paired_question_evaluation_changes_only_the_quote(monkeypatch):
     assert results["baseline"]["selected_vacancy"] is None and results["with_vacancies"]["selected_vacancy"] == "123"
 
 
-def test_repeat_collect_reuses_fresh_details_and_refreshes_stale_or_changed(tmp_path, monkeypatch):
-    url = f"sqlite:///{(tmp_path / 'hh-cache.db').as_posix()}"
+def test_repeat_collect_reuses_fresh_details_and_refreshes_stale_or_changed(database_url, monkeypatch):
+    url = database_url
     monkeypatch.setenv("DATABASE_URL", url)
     command.upgrade(Config("alembic.ini"), "head")
     engine, sessions = database(url)
@@ -310,8 +310,8 @@ def test_repeat_collect_reuses_fresh_details_and_refreshes_stale_or_changed(tmp_
 
 
 @pytest.mark.parametrize("use_documentation", [False, True])
-def test_latest_vacancy_sample_reaches_question_but_not_card(tmp_path, monkeypatch, use_documentation):
-    url = f"sqlite:///{(tmp_path / 'market.db').as_posix()}"
+def test_latest_vacancy_sample_reaches_question_but_not_card(database_url, tmp_path, monkeypatch, use_documentation):
+    url = database_url
     monkeypatch.setenv("DATABASE_URL", url)
     command.upgrade(Config("alembic.ini"), "head")
     origin = "http://localhost:5173"
@@ -423,8 +423,8 @@ def test_latest_vacancy_sample_reaches_question_but_not_card(tmp_path, monkeypat
         assert not sources_for_question(db, {"role": "Python backend"}, state, "decision")
 
 
-def test_editor_adds_profession_from_an_interview_and_reviews_a_trial_sample(tmp_path, monkeypatch):
-    url = f"sqlite:///{(tmp_path / 'profession.db').as_posix()}"
+def test_editor_adds_profession_from_an_interview_and_reviews_a_trial_sample(database_url, monkeypatch):
+    url = database_url
     monkeypatch.setenv("DATABASE_URL", url)
     command.upgrade(Config("alembic.ini"), "head")
     origin = "http://localhost:5173"

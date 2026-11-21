@@ -47,8 +47,8 @@ def press(user_id, data):
         "message_id": 1, "chat": {"id": user_id, "type": "private"}}}}
 
 
-def make_app(tmp_path, monkeypatch, **options):
-    url = f"sqlite:///{(tmp_path / 'telegram.db').as_posix()}"
+def make_app(database_url, monkeypatch, **options):
+    url = database_url
     monkeypatch.setenv("DATABASE_URL", url)
     command.upgrade(Config("alembic.ini"), "head")
     settings = Settings(database_url=url, app_origin=ORIGIN, **{"telegram_open_signup": False, **options})
@@ -61,8 +61,8 @@ def make_bot(app, settings, fake):
     return bot
 
 
-def test_interview_in_telegram(tmp_path, monkeypatch):
-    app, settings = make_app(tmp_path, monkeypatch, telegram_open_signup=True)
+def test_interview_in_telegram(database_url, monkeypatch):
+    app, settings = make_app(database_url, monkeypatch, telegram_open_signup=True)
     answers = []
 
     async def extract(settings, question, answer, state):
@@ -127,8 +127,8 @@ def test_interview_in_telegram(tmp_path, monkeypatch):
         assert db.scalar(select(Message.status).where(Message.kind == "answer")) == "processed"
 
 
-def test_invite_links_existing_user(tmp_path, monkeypatch):
-    app, settings = make_app(tmp_path, monkeypatch)
+def test_invite_links_existing_user(database_url, monkeypatch):
+    app, settings = make_app(database_url, monkeypatch)
     with app.state.sessions.begin() as db:
         db.add(User(email="owner@example.test", password_hash=hash_password("test-password-123")))
     code = create_invite(app.state.sessions, "owner@example.test")
@@ -164,8 +164,8 @@ def test_invite_links_existing_user(tmp_path, monkeypatch):
         assert db.scalar(select(TelegramInvite)) is None
 
 
-def test_unknown_profession_lists_the_catalog(tmp_path, monkeypatch):
-    app, settings = make_app(tmp_path, monkeypatch, telegram_open_signup=True)
+def test_unknown_profession_lists_the_catalog(database_url, monkeypatch):
+    app, settings = make_app(database_url, monkeypatch, telegram_open_signup=True)
     fake = FakeTelegram()
 
     async def scenario():
@@ -208,8 +208,8 @@ def test_wrong_layout_is_detected_word_by_word(text, expected):
     assert fixed_layout(text) == expected
 
 
-def test_role_typos_and_wrong_layout(tmp_path, monkeypatch):
-    app, settings = make_app(tmp_path, monkeypatch, telegram_open_signup=True)
+def test_role_typos_and_wrong_layout(database_url, monkeypatch):
+    app, settings = make_app(database_url, monkeypatch, telegram_open_signup=True)
     fake = FakeTelegram()
 
     async def scenario():
@@ -234,8 +234,8 @@ def test_role_typos_and_wrong_layout(tmp_path, monkeypatch):
         assert db.get(TelegramAccount, 4).state["intake"] == {"role": "QA"}
 
 
-def test_interview_stops_circling_without_new_cases(tmp_path, monkeypatch):
-    app, settings = make_app(tmp_path, monkeypatch, telegram_open_signup=True)
+def test_interview_stops_circling_without_new_cases(database_url, monkeypatch):
+    app, settings = make_app(database_url, monkeypatch, telegram_open_signup=True)
 
     async def extract(settings, question, answer, state):
         if "индекс" in answer["text"]:

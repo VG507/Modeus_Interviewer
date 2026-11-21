@@ -189,8 +189,37 @@ GitHub Trends сохраняет README и снимки звёзд для наб
 
 В учебных материалах можно кратко пересказать рабочую задачу и дать ссылку на первоисточник. Если нужен дословный фрагмент Issue, README или чужой пример кода, редактор перед публикацией проверяет лицензию именно этого материала и соблюдает условия использования, в том числе требования к атрибуции.
 
-## PostgreSQL и дальнейшая разработка
+## PostgreSQL
 
-Локально выбран SQLite: Docker daemon недоступен. Для командного сервера выбран PostgreSQL; совместимость требует отдельного прогона миграций и тестов на нём. Установить `psycopg[binary]`, задать `DATABASE_URL=postgresql+psycopg://...`, выполнить миграции. Это переключение не переносит существующие данные из SQLite автоматически. Не использовать одну SQLite-БД с нескольких машин.
+Основная база — PostgreSQL 18 с расширением pgvector для будущих эмбеддингов. SQLite остаётся запасным вариантом: без `DATABASE_URL` backend и тесты работают на нём. Не использовать одну SQLite-БД с нескольких машин.
 
-Текущая вершина миграций — `0019`. Хранение описано в `backend/db.py`, вход — в `backend/auth.py` и `backend/security.py`. За цикл интервью отвечают `backend/interview_api.py`, `backend/interview_worker.py` и `backend/interview_engine.py`. Публикация и каталог находятся в `backend/card_api.py`, Telegram-бот — в `backend/telegram_bot.py`, код web — в `frontend/src`.
+macOS (формула `postgresql@18` не попадает в PATH сама):
+
+```bash
+brew install postgresql@18 pgvector
+brew services start postgresql@18
+export PATH="$(brew --prefix postgresql@18)/bin:$PATH"
+psql -d postgres -c "create role modeus login password 'modeus' createdb"
+psql -d postgres -c "create database modeus owner modeus"
+psql -d modeus -c "create extension if not exists vector"
+```
+
+Windows: `winget install PostgreSQL.PostgreSQL.18`, затем те же три команды `psql` через `psql -U postgres`. pgvector пока не обязателен: миграции его не используют.
+
+В `.env` укажите `DATABASE_URL=postgresql+psycopg://modeus:modeus@localhost/modeus` и выполните `alembic upgrade head`. Драйвер `psycopg` ставится из `requirements.lock`.
+
+Перенос данных из SQLite в свежую базу после миграций:
+
+```powershell
+.venv/Scripts/python.exe -m backend.cli copy-database sqlite:///./.work/modeus.db
+```
+
+Команда копирует все таблицы одной транзакцией и печатает число строк по каждой. Версии миграций обеих баз должны совпадать. Если в целевой базе уже есть пользователи, команда ничего не меняет. Перед переносом остановите backend.
+
+Тесты на PostgreSQL: каждый тест создаёт и удаляет свою базу, поэтому роли нужно право `createdb`. Без переменной тесты идут на SQLite.
+
+```powershell
+$env:TEST_DATABASE_URL="postgresql+psycopg://modeus:modeus@localhost/postgres"; .venv/Scripts/python.exe -m pytest -q
+```
+
+Текущая вершина миграций — `0020`. Хранение описано в `backend/db.py`, вход — в `backend/auth.py` и `backend/security.py`. За цикл интервью отвечают `backend/interview_api.py`, `backend/interview_worker.py` и `backend/interview_engine.py`. Публикация и каталог находятся в `backend/card_api.py`, Telegram-бот — в `backend/telegram_bot.py`, код web — в `frontend/src`.

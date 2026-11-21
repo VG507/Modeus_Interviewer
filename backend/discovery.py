@@ -88,8 +88,8 @@ def collection_lease(sessions, provider):
             index_elements=[DiscoveryWindow.provider],
             set_={"token": lease.excluded.token, "available_at": lease.excluded.available_at},
             where=or_(DiscoveryWindow.available_at.is_(None), DiscoveryWindow.available_at <= stamp),
-        )).rowcount
-    if not claimed:
+        ).returning(DiscoveryWindow.provider)).first()
+    if claimed is None:
         raise DiscoveryBusy("Collection already running")
     try:
         yield

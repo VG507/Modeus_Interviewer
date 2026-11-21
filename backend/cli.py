@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from sqlalchemy import delete, select
 
 from backend.agent_skills import collect_skills
-from backend.db import LlmResponse, LoginSession, User, VacancyCollection, database
+from backend.db import LlmResponse, LoginSession, User, VacancyCollection, copy_database, database
 from backend.discovery import candidate_output, collect, item_entry, list_candidates
 from backend.discovery_fetch import CollectionError
 from backend.documentation import collect_documentation
@@ -83,6 +83,8 @@ def main():
     sub.add_parser("check-llm")
     forget = sub.add_parser("clear-llm-cache", help="Forget stored model answers so the model is asked again")
     forget.add_argument("--model", help="Only answers of this model")
+    copy = sub.add_parser("copy-database", help="Copy all rows from another database into the empty DATABASE_URL")
+    copy.add_argument("source", help="Source database URL, e.g. sqlite:///./.work/modeus.db")
     collect = sub.add_parser("import-vacancies", help="Refresh HH vacancies for one profile")
     collect.add_argument("profession_id")
     collect.add_argument("--file", type=Path, help="Import a JSON array of saved detailed HH responses")
@@ -139,6 +141,12 @@ def main():
             # No exception body from HTTP clients: URLs may include credentials.
             print(str(exc) if type(exc) is RuntimeError else type(exc).__name__)
             raise SystemExit(1) from None
+        return
+    if args.command == "copy-database":
+        try:
+            print(json.dumps(copy_database(args.source, settings.database_url)))
+        except RuntimeError as exc:
+            parser.exit(1, f"copy-database: {exc}\n")
         return
     if args.command == "clear-llm-cache":
         engine, sessions = database(settings.database_url)

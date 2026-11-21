@@ -32,8 +32,8 @@ from backend.documentation_fetch import TARGETS, release_notes
 
 
 @pytest.fixture
-def sessions(tmp_path, monkeypatch):
-    url = f"sqlite:///{(tmp_path / 'discovery.db').as_posix()}"
+def sessions(database_url, monkeypatch):
+    url = database_url
     monkeypatch.setenv("DATABASE_URL", url)
     monkeypatch.setenv("APP_ORIGIN", "http://localhost:5173")
     monkeypatch.setenv("LLM_BASE_URL", "")

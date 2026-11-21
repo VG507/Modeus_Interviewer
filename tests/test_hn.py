@@ -14,8 +14,8 @@ from backend.discovery_fetch import CollectionError
 
 
 @pytest.fixture
-def sessions(tmp_path):
-    engine, sessions = database(f"sqlite:///{(tmp_path / 'hn.db').as_posix()}")
+def sessions(database_url):
+    engine, sessions = database(database_url)
     config = Config("alembic.ini")
     with engine.begin() as connection:
         config.attributes["connection"] = connection

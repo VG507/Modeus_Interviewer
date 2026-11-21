@@ -57,8 +57,8 @@ def wait_for(client, path, status):
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    url = f"sqlite:///{(tmp_path / 'injection.db').as_posix()}"
+def client(database_url, monkeypatch):
+    url = database_url
     monkeypatch.setenv("DATABASE_URL", url)
     command.upgrade(Config("alembic.ini"), "head")
     app = create_app(Settings(database_url=url, app_origin=ORIGIN))

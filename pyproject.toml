@@ -2,11 +2,10 @@
 name = "modeus-interviewer"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["fastapi", "uvicorn", "sqlalchemy", "alembic", "httpx[socks]", "pydantic-settings", "PyYAML", "rapidfuzz"]
+dependencies = ["fastapi", "uvicorn", "sqlalchemy", "alembic", "httpx[socks]", "pydantic-settings", "PyYAML", "rapidfuzz", "psycopg[binary]"]
 
 [project.optional-dependencies]
 dev = ["pytest"]
-postgres = ["psycopg[binary]"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

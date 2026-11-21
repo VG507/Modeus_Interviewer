@@ -19,8 +19,8 @@ from backend.settings import Settings
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    url = f"sqlite:///{(tmp_path / 'test.db').as_posix()}"
+def client(database_url, monkeypatch):
+    url = database_url
     monkeypatch.setenv("DATABASE_URL", url)
     command.upgrade(Config("alembic.ini"), "head")
     app = create_app(Settings(database_url=url, app_origin="http://localhost:5173/, http://127.0.0.1:5173/"))

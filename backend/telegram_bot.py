@@ -7,16 +7,20 @@ so validation, quotas, idempotency and processing stay in one place.
 import asyncio
 import html
 import logging
+import re
 import secrets
 from dataclasses import dataclass, replace
 from datetime import timedelta
+from difflib import SequenceMatcher
 from uuid import uuid4
 
 import httpx
 from sqlalchemy import delete, select
 
+from backend.catalog_topics import catalog_profiles
 from backend.db import LoginSession, TelegramAccount, TelegramInvite, User, now
 from backend.security import hash_password, token_hash
+from backend.vacancy_parser import profile_matches, role_key
 
 logger = logging.getLogger(__name__)
 INVITE_HOURS = 72
@@ -44,7 +48,8 @@ PROCESSING_ERRORS = {
     "LLM_UNAVAILABLE": "Модель недоступна.",
     "INVALID_MODEL_OUTPUT": "Модель вернула ответ в неподходящем формате.",
 }
-ONE_SHOT = {"skip", "retry", "finish-yes", "finish-no", "intake-skip", "publish", "publish-anon", "publish-name"}
+ONE_SHOT = {"skip", "retry", "finish-yes", "finish-no", "intake-skip", "role", "layout-yes", "layout-no",
+            "publish", "publish-anon", "publish-name"}
 COMMANDS = [
     {"command": "new", "description": "Начать новое интервью"},
     {"command": "interviews", "description": "Мои интервью"},
@@ -67,6 +72,29 @@ HELP = (
 NO_ACCESS = ("Доступ к Modeus выдаёт команда проекта. Попросите ссылку-приглашение и откройте её, "
              "чтобы связать Telegram с вашим аккаунтом.")
 NO_INTERVIEW = "Сейчас нет открытого интервью. Начните новое командой /new."
+# Words that name the field without a direction, and words that say nothing about the role.
+BROAD_WORDS = re.compile(
+    r"разработчи\w*|программист\w*|инженер\w*|девелопер\w*|айтишни\w*|developer|engineer|software|"
+    r"back|end|backend|full|stack|fullstack|б[эе]к|[эе]нд|б[эе]кенд\w*|фул+|стек\w*|фул+стек\w*"
+)
+FILLER_WORDS = re.compile(
+    r"я|ну|просто|работаю|по|профессии|в|it|ит|айти|программн\w*|"
+    r"senior|middle|junior|lead|сеньор\w*|мидл\w*|джун\w*|старш\w*|младш\w*|ведущ\w*|главн\w*"
+)
+# Russian names and common spellings of the built-in professions; typos are compared with them too.
+ROLE_WORDS = {
+    "python_backend": ("python", "django", "fastapi", "flask", "питон", "пайтон", "джанго"),
+    "frontend": ("frontend", "фронтенд", "фронтэнд", "react", "реакт"),
+    "qa": ("тестировщик", "тестировщица", "тестирование", "тестер", "автотестер", "sdet"),
+    "devops": ("devops", "девопс", "devsecops"),
+}
+# Letter pairs that Russian words do not have, so «html» is not read as «реьд».
+IMPOSSIBLE_RUSSIAN = re.compile(r"^[ьъы]|[аеёиоуыэюя][ьъ]|ыы|йй|[ьъ][ьъы]")
+# The same keys of the English and Russian (ЙЦУКЕН) layouts.
+LAYOUT = str.maketrans(
+    "`qwertyuiop[]asdfghjkl;'zxcvbnm,./~QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?@#$^&",
+    "ёйцукенгшщзхъфывапролджэячсмитьбю.ЁЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЯЧСМИТЬБЮ,\"№;:?",
+)
 
 
 @dataclass(frozen=True)
@@ -170,6 +198,57 @@ def save_state(sessions, telegram_id, changes, interview_id=None):
             return False
         account.state = {**account.state, **changes}
         return True
+
+
+def broad_role(role):
+    """True for a role such as «я разработчик» that names only the field; any other word names a direction."""
+    words = role_key(role).split()
+    return (any(BROAD_WORDS.fullmatch(word) for word in words)
+            and all(BROAD_WORDS.fullmatch(word) or FILLER_WORDS.fullmatch(word) for word in words))
+
+
+def similar_profile(role, catalog):
+    """The catalog profession that the role nearly spells, such as «тестеровщик» for QA."""
+    words = [word for word in role_key(role).split() if len(word) >= 4]
+    for item in catalog:
+        names = [*ROLE_WORDS.get(item.profession_id, ()), *role_key(item.title).split(),
+                 *(name for alias in item.aliases or () for name in role_key(alias).split())]
+        names = [name for name in names if len(name) >= 4
+                 and not BROAD_WORDS.fullmatch(name) and not FILLER_WORDS.fullmatch(name)]
+        if any(SequenceMatcher(None, word, name).ratio() >= 0.8 for word in words for name in names):
+            return item
+    return None
+
+
+def fixed_layout(text):
+    """Text with words typed in the English layout, such as «ghbdtn», converted to Russian; otherwise None.
+
+    Words that read as English or as acronyms («Python», «SQL») stay as they are.
+    """
+    if re.search(r"[а-яё]", text, re.IGNORECASE) or "://" in text:
+        return None
+    parts = re.split(r"(\s+)", text)
+    wrong, short = set(), set()
+    for index, part in enumerate(parts):
+        letters = re.sub(r"[^a-z]", "", part.lower())
+        russian = re.sub(r"[^а-яё]", "", part.translate(LAYOUT).lower())
+        if not russian or re.search(r"\d", part) or (part.isupper() and len(letters) > 1 and len(letters) <= 5):
+            continue
+        if len(russian) <= 3:
+            short.add(index)
+        if (len(russian) >= 3 and not IMPOSSIBLE_RUSSIAN.search(russian)
+                and sum(letter in "aeiouy" for letter in letters) <= len(letters) * 0.2
+                and sum(letter in "аеёиоуыэюя" for letter in russian) >= len(russian) * 0.25):
+            wrong.add(index)
+    if not any(len(re.sub(r"[^а-яё]", "", parts[index].translate(LAYOUT).lower())) >= 4 for index in wrong):
+        return None
+    # Next to a clearly mistyped word, short words such as «c» («с») are mistyped too.
+    return "".join(part.translate(LAYOUT) if index in wrong | short else part for index, part in enumerate(parts))
+
+
+def professions(sessions):
+    with sessions() as db:
+        return catalog_profiles(db)
 
 
 def followed_accounts(sessions):
@@ -412,6 +491,16 @@ class TelegramBot:
             if step:
                 account = await self.set_state(account, step=None)
             return await self.on_command(account, command)
+        fixed = fixed_layout(text)
+        if fixed:
+            await self.set_state(account, layout={"original": text, "fixed": fixed})
+            return await self.send(chat_id, f"Похоже, вы писали в английской раскладке. Вы имели в виду: "
+                                            f"«{escape(fixed)}»?",
+                                   [[("Да", "layout-yes"), ("Нет, оставить как есть", "layout-no")]])
+        await self.on_text(account, text)
+
+    async def on_text(self, account, text):
+        step = account.state.get("step")
         if step == "author_name":
             if len(text) > AUTHOR_LIMIT:
                 raise Notice(f"Имя должно быть не длиннее {AUTHOR_LIMIT} символов.")
@@ -458,6 +547,14 @@ class TelegramBot:
             await self.start_intake(account)
         elif action == "intake-skip" and account.state.get("step") in {name for name, *_ in INTAKE[1:]}:
             await self.intake_answer(account, "")
+        elif action == "role" and account.state.get("step") == INTAKE[0][0]:
+            catalog = await asyncio.to_thread(professions, self.sessions)
+            title = next((item.title for item in catalog if item.profession_id == value), "")
+            await self.intake_answer(account, title, listed=True)
+        elif action in {"layout-yes", "layout-no"} and account.state.get("layout"):
+            layout = account.state["layout"]
+            account = await self.set_state(account, layout=None)
+            await self.on_text(account, layout["fixed"] if action == "layout-yes" else layout["original"])
         elif action == "skip":
             await self.skip(account, value)
         elif action == "finish":
@@ -541,7 +638,7 @@ class TelegramBot:
         await self.send(account.chat_id, "Сначала несколько вопросов о вашей работе: они помогут задавать "
                                          f"точные уточнения.\n\n{escape(INTAKE[0][1])}")
 
-    async def intake_answer(self, account, value):
+    async def intake_answer(self, account, value, listed=False):
         names = [name for name, *_ in INTAKE]
         index = names.index(account.state["step"])
         name, prompt, limit = INTAKE[index]
@@ -549,10 +646,28 @@ class TelegramBot:
             raise Notice(prompt)
         if len(value) > limit:
             raise Notice(f"Ответ должен быть не длиннее {limit} символов.")
+        note = ""
+        if index == 0 and not listed:
+            catalog = await asyncio.to_thread(professions, self.sessions)
+            # An empty catalog accepts any role.
+            if catalog and not any(profile_matches(item.profession_id, value, item) for item in catalog):
+                profile = similar_profile(value, catalog)
+                if profile is None:
+                    heading = ("Уточните, в каком направлении вы работаете." if broad_role(value)
+                               else f"Профессии «{escape(value)}» у нас пока нет.")
+                    return await self.send(account.chat_id, (
+                        f"{heading} Интервью проводятся по этим профессиям:\n\n"
+                        + "\n".join(f"• {escape(item.title)}" for item in catalog)
+                        + "\n\nВыберите профессию кнопкой или напишите роль ещё раз."
+                    ), [[(item.title, f"role:{item.profession_id}")] for item in catalog
+                        if len(f"role:{item.profession_id}".encode()) <= 64])
+                # The typed role does not match the catalog, so keep the profession's own name.
+                value, note = profile.title, f"Записал профессию: {escape(profile.title)}.\n\n"
         intake = {**account.state.get("intake", {}), name: value}
         if index + 1 < len(INTAKE):
             await self.set_state(account, step=names[index + 1], intake=intake)
-            return await self.send(account.chat_id, escape(INTAKE[index + 1][1]), [[("Пропустить", "intake-skip")]])
+            return await self.send(account.chat_id, note + escape(INTAKE[index + 1][1]),
+                                   [[("Пропустить", "intake-skip")]])
         account = await self.set_state(account, step=None, intake=None)
         created = await self.request(account.user_id, "POST", "/interviews", {"context": intake})
         await self.set_state(account, interview_id=created["id"], seen=0)
@@ -680,6 +795,11 @@ class TelegramBot:
     async def deliver(self, account, detail):
         fresh = [item for item in detail["messages"]
                  if item["sequence"] > account.state.get("seen", 0) and item["status"] != "draft"]
+        last = max((index for index, item in enumerate(fresh) if item["kind"] == "question"), default=None)
+        # The interview and its messages are read separately, so a question that is still being saved can be
+        # listed before it becomes current; it is delivered on the next pass.
+        if last is not None and processing(detail) and fresh[last]["id"] != detail["current_question_id"]:
+            fresh = fresh[:last]
         if not fresh:
             return
         for item in fresh:

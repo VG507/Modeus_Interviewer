@@ -213,3 +213,138 @@ def test_long_open_reply_keeps_evidence_from_its_last_batch(monkeypatch):
     assert [(fact["field"], fact["text"]) for fact in state["facts"]] == [
         ("task", task), ("verification", verification),
     ]
+
+
+@pytest.mark.parametrize("reply", ["Не знаю.", "не помню", "Честно, не могу вспомнить…", "Без понятия"])
+def test_no_recall_skips_the_question_instead_of_asking_to_rephrase(monkeypatch, reply):
+    async def classify(*args):
+        raise AssertionError("A no-recall reply does not need the model")
+
+    monkeypatch.setattr(interview_engine, "ask_model", classify)
+    case = interview_engine.Evidence(facts=[
+        interview_engine.Candidate(field="task", quote="Отчёт грузился минуту."),
+        interview_engine.Candidate(field="action", quote="Добавил индекс."),
+    ], ambiguous=[], not_applicable=[], refused=False)
+    state, _ = interview_engine.apply_extraction(CaseState(asked_intents=["get_case"]).model_dump(),
+                                                 case, "a1", "get_case")
+    state = {**state, "asked_intents": ["get_case", "decision"]}
+    result = asyncio.run(interview_engine.extract(None, "Почему вы выбрали индекс?", {"text": reply}, state))
+    assert (result.refused, result.needs_rephrase, result.assessment) == (False, False, "declined")
+    next_state, extraction = interview_engine.apply_extraction(state, result, "a2", "decision")
+    assert extraction["declined_intents"] == ["decision"]
+    assert interview_engine.choose_intent(next_state) == "verification"
+    assert not interview_engine.NO_RECALL.fullmatch("Не знаю, но после индекса отчёт ускорился.")
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("Понятно, отчёт ускоряли индексом. Как вы поняли, что стало быстрее?",
+     "Понятно, отчёт ускоряли индексом. Как вы поняли, что стало быстрее?"),
+    ("Понял, что ты добавил индекс. Почему именно его?", interview_engine.FALLBACK_QUESTIONS["decision"]),
+])
+def test_followup_keeps_a_polite_two_part_question(monkeypatch, text, expected):
+    async def model(settings, schema, instructions, payload):
+        return schema(text=text)
+
+    monkeypatch.setattr(interview_engine, "ask_model", model)
+    result = asyncio.run(interview_engine.formulate_question(
+        None, "Отчёт", "decision", {"text": "Добавил индекс."}, CaseState().model_dump()))
+    assert result.text == expected
+
+
+def test_broad_reply_gets_examples_for_the_role():
+    state = {**CaseState().model_dump(), "intake": {"role": "Тестировщик"}}
+    result = asyncio.run(interview_engine.formulate_question(None, "Рабочий случай", "rephrase", None, state))
+    assert "нестабильный автотест" in result.text
+    assert interview_engine.case_examples({}) == interview_engine.DEFAULT_CASE_EXAMPLES
+
+
+def test_second_clarification_shows_a_sample_answer(monkeypatch):
+    async def model(settings, schema, instructions, payload):
+        return schema(text="Понятно, отчёт ускорили. Как вы поняли, что стало быстрее?")
+
+    monkeypatch.setattr(interview_engine, "ask_model", model)
+    state = {**CaseState().model_dump(), "intake": {"role": "Тестировщик"}}
+    first = asyncio.run(interview_engine.formulate_question(None, "Рабочий случай", "rephrase", None, state))
+    assert "(Например" not in first.text
+    again = {**state, "followups_without_new_information": 1}
+    case = asyncio.run(interview_engine.formulate_question(None, "Рабочий случай", "rephrase", None, again))
+    assert case.text.endswith("(Например: «Перед релизом я нашёл баг: при оплате заказ создавался дважды. "
+                              "Описал шаги воспроизведения, и баг исправили до выката».)")
+    check = asyncio.run(interview_engine.formulate_question(None, "Отчёт", "verification", {"text": "Стало лучше."},
+                                                            again))
+    assert check.text == ("Понятно, отчёт ускорили. Как вы поняли, что стало быстрее? "
+                          "(Например: «Сравнил до и после на тех же данных: было 60 секунд, стало 3».)")
+
+
+def test_long_followup_is_replaced_with_a_clear_question(monkeypatch):
+    async def model(settings, schema, instructions, payload):
+        return schema(text="Слушаю, вы говорили, что отчёт грузился минуту — " + "это значит, что процесс шёл, " * 8
+                           + "что вы сделали?")
+
+    monkeypatch.setattr(interview_engine, "ask_model", model)
+    result = asyncio.run(interview_engine.formulate_question(
+        None, "Отчёт", "action", {"text": "Грузился минуту."}, CaseState().model_dump()))
+    assert result.text == interview_engine.FALLBACK_QUESTIONS["action"]
+
+
+@pytest.mark.parametrize("reply,topic", [
+    ("Как-то раз нашёл баг в оплате", "Нашёл баг в оплате"),
+    ("Да разные баги находил", None),
+])
+def test_brief_episode_starts_a_case(monkeypatch, reply, topic):
+    async def classify(*args):
+        return interview_engine.DiscoverySelection(facts=[], ambiguous=[], not_applicable=[], refused=False,
+                                                   answer_fit="unclear", topic_title=None)
+
+    monkeypatch.setattr(interview_engine, "ask_model", classify)
+    state = CaseState(open_interview=True, asked_intents=["get_case"]).model_dump()
+    result = asyncio.run(interview_engine.extract(None, "Что произошло?", {"text": reply}, state))
+    assert result.needs_rephrase is (topic is None)
+    assert result.topic_title == topic
+    if topic:
+        assert [(fact.field, fact.quote) for fact in result.facts] == [("task", reply)]
+
+
+@pytest.mark.parametrize("reply", [
+    RuntimeError("LLM_INVALID_RESPONSE"),
+    "Хорошо, я получил ответ: «Отчёт грузился минуту». Суть — отчёт грузился. Вопрос: С чего вы начали?",
+])
+def test_malformed_followup_falls_back_to_a_fixed_question(monkeypatch, reply):
+    async def model(settings, schema, instructions, payload):
+        if isinstance(reply, Exception):
+            raise reply
+        return schema(text=reply)
+
+    monkeypatch.setattr(interview_engine, "ask_model", model)
+    result = asyncio.run(interview_engine.formulate_question(
+        None, "Отчёт", "action", {"text": "Грузился минуту."}, CaseState().model_dump()))
+    assert result.text == interview_engine.FALLBACK_QUESTIONS["action"]
+
+
+def test_unavailable_model_still_fails_the_followup(monkeypatch):
+    async def model(settings, schema, instructions, payload):
+        raise RuntimeError("LLM_HTTP_ERROR: 503")
+
+    monkeypatch.setattr(interview_engine, "ask_model", model)
+    with pytest.raises(RuntimeError):
+        asyncio.run(interview_engine.formulate_question(
+            None, "Отчёт", "action", {"text": "Грузился минуту."}, CaseState().model_dump()))
+
+
+@pytest.mark.parametrize("reply,kept", [
+    ("Был медленный отчёт по заказам, он строился около минуты.", []),
+    ("Был медленный отчёт, я добавил индекс. Замеров не было, это был срочный хотфикс.", ["verification"]),
+])
+def test_not_applicable_needs_the_speakers_words(monkeypatch, reply, kept):
+    async def classify(*args):
+        return interview_engine.TurnSelection(
+            facts=[{"field": "task", "sentence": 1}], ambiguous=[], refused=False, answer_fit="work_case",
+            not_applicable=["task", "context", "action", "decision", "verification"] if not kept else kept,
+        )
+
+    monkeypatch.setattr(interview_engine, "ask_model", classify)
+    state = CaseState(asked_intents=["get_case"]).model_dump()
+    result = asyncio.run(interview_engine.extract(None, "Что произошло?", {"text": reply}, state))
+    assert result.not_applicable == kept
+    next_state, _ = interview_engine.apply_extraction(state, result, "a1", "get_case")
+    assert interview_engine.choose_intent(next_state) is not None

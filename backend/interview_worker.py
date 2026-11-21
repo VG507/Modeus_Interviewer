@@ -15,6 +15,8 @@ from backend.db import InterviewSession, KnowledgeCard, Message, Topic, now
 from backend.interview_engine import (
     InvalidModelOutput,
     apply_extraction,
+    case_answer,
+    case_examples,
     choose_intent,
     extract,
     formulate,
@@ -116,12 +118,27 @@ def advance_case(db, interview):
         ).order_by(Topic.id)))
         position = next((index for index, item in enumerate(topics) if item.id == current.id), -1)
         following = topics[(position + 1) % len(topics)] if topics else original
+    finished = state.get("discovered_topic") or current.title
     if state.get("facts"):
-        past = [*past, {"title": state.get("discovered_topic") or current.title, "state": state}]
+        past = [*past, {"title": finished, "state": state}]
+    empty = 0 if state.get("facts") else state.get("empty_cases", 0) + 1
     interview.case_state = CaseState(active_topic_id=following.id, past_cases=past,
-                                     open_interview=open_interview).model_dump()
+                                     open_interview=open_interview, empty_cases=empty).model_dump()
     interview.current_question_id = None
-    queue(interview, "initial_question", new_case=True, same_topic=following.id == current.id)
+    if empty >= 2 and past:
+        # No new case comes to mind, so the card is built from the cases already told.
+        append_message(db, interview, kind="control",
+                       text="Похоже, новые случаи сейчас не вспоминаются — собираю карточку из того, что вы уже рассказали.")
+        clear_job(interview)
+        complete(db, interview)
+    elif empty >= 3:
+        append_message(db, interview, kind="control",
+                       text="Подходящий случай пока не вспомнился, поэтому я перестаю задавать вопросы. "
+                            "Когда вспомните, начните новое интервью.")
+        clear_job(interview)
+    else:
+        queue(interview, "initial_question", new_case=True, same_topic=following.id == current.id,
+              wrapped=finished if state.get("facts") else None, stalled=empty >= 2)
 
 
 class InvalidJob(Exception):
@@ -223,14 +240,26 @@ async def execute_stage(sessions, settings, interview_id, token):
 
     final_extraction = None
     if stage == "initial_question":
-        if state.get("open_interview") and job.get("new_case"):
-            output = "Теперь вспомните другой рабочий случай. Что произошло и какую задачу нужно было решить?"
+        examples = case_examples(model_state["intake"])
+        if job.get("stalled"):
+            output = ("Похоже, сейчас сложно вспомнить подходящий случай — это нормально. Попробуйте рассказать "
+                      "один случай целиком, от проблемы до результата "
+                      f"(Например: «{case_answer(model_state['intake'])}».) "
+                      "Если сейчас не получается, можно вернуться к интервью позже.")
+        elif job.get("wrapped") and state.get("open_interview"):
+            output = (f"Похоже, про случай «{job['wrapped']}» главное мы выяснили. Если вспомните другой рабочий "
+                      f"случай, расскажите, например: {examples}. Или нажмите «Завершить интервью», "
+                      "и я соберу карточку.")
+        elif state.get("open_interview") and job.get("new_case"):
+            output = f"Давайте возьмём другой рабочий случай, например: {examples}. Что тогда произошло и что вы сделали?"
         elif job.get("same_topic"):
-            output = f"Вспомните другой рабочий случай по теме «{title}». Что произошло?"
+            output = f"Вспомните ещё один случай по теме «{title}». Что тогда произошло и что вы сделали?"
         else:
             output = opening or f"Расскажите о конкретном рабочем случае по теме «{title}»."
             if job.get("new_case"):
                 output = f"Перейдём к теме «{title}». {output}"
+            elif state.get("open_interview"):
+                output += f" Например: {examples}."
     elif stage == "extraction":
         output = await extract(settings, question, answer, model_state)
     elif stage == "question":

@@ -96,6 +96,8 @@ class CaseState(Schema):
     discovered_topic: ShortText | None = None
     past_cases: list[dict] = Field(default_factory=list)
     case_start_sequence: int | None = Field(default=None, ge=1)
+    # Cases in a row that ended without any facts.
+    empty_cases: int = Field(default=0, ge=0)
 
 
 class ApiError(Schema):

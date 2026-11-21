@@ -15,8 +15,8 @@ from sqlalchemy import and_, case, func, or_, select
 
 from backend.db import HackerNewsItem, VacancyCollection, insert_for, now
 from backend.discovery_fetch import CollectionError, fetch
-from backend.vacancy_import import FRESH_FOR
 from backend.vacancy_parser import SKILL_ALIASES, canonical_skill, clean_html, plain
+from backend.vacancy_samples import fresh_vacancy_samples, trudvsem_samples
 
 
 API = "https://hacker-news.firebaseio.com/v0"
@@ -101,12 +101,13 @@ def profile_terms(db, profession, additional, stamp):
         raise CollectionError("Unknown profession")
     if additional and not profession:
         raise CollectionError("Specify a profession when using --technology")
+    samples = trudvsem_samples(db, profession)
     result = {}
     for profile in profiles:
         id_ = profile.profession_id
         terms = set(PROFILE_TECHNOLOGIES.get(id_, ()))
-        if profile.approved and profile.updated_at and stamp - profile.updated_at <= FRESH_FOR:
-            mentions = Counter(skill for card in profile.cards
+        if profile.approved:
+            mentions = Counter(skill for cards, _ in fresh_vacancy_samples(profile, samples.get(id_), stamp) for card in cards
                                for skill in {canonical_skill(skill) for skill in card.get("skills", [])})
             terms.update(skill for skill, count in mentions.items() if count >= 2)
         if id_ == profession:

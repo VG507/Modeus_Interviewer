@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api, ApiError, describe } from './api';
 
 const sources = {
-  hh: 'Вакансии HH', github: 'GitHub Issues', trends: 'GitHub Trends',
+  hh: 'Вакансии HH', trudvsem: 'Работа России', github: 'GitHub Issues', trends: 'GitHub Trends',
   docs: 'Официальная документация', hn: 'Hacker News', openalex: 'Научные статьи', skills: 'Agent Skills',
 } as const;
 type Source = keyof typeof sources;
@@ -13,9 +13,10 @@ type Step = {
   items?: { id: number; title: string; url: string; score: number }[];
 };
 type Run = { id: string; running: boolean; steps: Partial<Record<Source, Step>> };
+type VacancyQuality = { checked_at: string | null; vacancies: number; employers: number; fresh: boolean;
+  approved: boolean; current_config: boolean; source: string | null };
 type Quality = {
-  hh: { checked_at: string | null; vacancies: number; employers: number; fresh: boolean; approved: boolean;
-    current_config: boolean; source: string | null };
+  hh: VacancyQuality; trudvsem?: VacancyQuality;
   materials: Record<'github' | 'trends' | 'docs', Record<string, number>> &
     { openalex?: Record<string, number>; skills?: Record<string, number> };
   automatic_check_enabled: boolean;
@@ -29,10 +30,17 @@ const messages: Record<string, string> = {
   HH_NOT_CONFIGURED: 'Подключите API HeadHunter.',
   HH_TIMEOUT: 'Не удалось завершить обновление вакансий вовремя.',
   HH_EMPTY_SAMPLE: 'По запросу профиля не найдено подходящих вакансий.',
+  TRUDVSEM_DISABLED: 'Сбор отключён в настройках сервера.',
+  TRUDVSEM_TIMEOUT: 'API «Работа России» не ответило вовремя.',
+  TRUDVSEM_UNAVAILABLE: 'API «Работа России» недоступно.',
+  TRUDVSEM_RATE_LIMITED: 'Портал ограничил частоту запросов. Повтори сбор позже.',
+  TRUDVSEM_INVALID_RESPONSE: 'API вернуло данные в неожиданном формате.',
+  TRUDVSEM_EMPTY_SAMPLE: 'По названию и синонимам профессии не найдено подходящих вакансий с описанием.',
+  TRUDVSEM_SUPERSEDED: 'Настройки профессии изменились во время сбора. Запусти его снова.',
   GITHUB_NOT_CONFIGURED: 'Задайте репозитории или темы в форме отдельного сбора ниже.',
   DOCS_NOT_CONFIGURED: 'Выберите разделы в настройках официальной документации.',
   HN_DISABLED: 'Сбор отключён в конфигурации сервера.',
-  HN_NOT_CONFIGURED: 'Для профиля пока нет списка технологий или свежей одобренной выборки HH.',
+  HN_NOT_CONFIGURED: 'Для профиля пока нет списка технологий или свежей подтверждённой выборки вакансий.',
   HN_UNAVAILABLE: 'Ленты Hacker News недоступны.',
   OPENALEX_NOT_CONFIGURED: 'На сервере нужен ключ OpenAlex.',
   OPENALEX_NO_TASKS: 'Для поиска нужна свежая одобренная выборка вакансий с рабочими задачами.',
@@ -48,17 +56,22 @@ const messages: Record<string, string> = {
 };
 const retryable = new Set(['partial', 'failed', 'busy', 'interrupted']);
 
+function VacancySample({ label, sample }: { label: string; sample: VacancyQuality }) {
+  const date = sample.checked_at && new Date(sample.checked_at).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' });
+  return <li><a href="#/data/vacancies">{label}</a>{date ? <>
+    {' · выборка от '}{date} · {sample.vacancies} вакансий, {sample.employers} работодателей
+    {' · '}{sample.fresh ? 'свежая' : 'срок актуальности истёк'}
+    {!(sample.approved && sample.current_config) && ' · профиль или выборка требуют проверки'}
+    {sample.source === 'file' && ' · импорт из файла'}
+  </> : ' · выборки пока нет'}</li>;
+}
+
 function QualitySummary({ quality }: { quality: Quality }) {
-  const { hh, materials } = quality;
+  const { hh, trudvsem, materials } = quality;
   const { github, docs, trends, openalex: research, skills } = materials;
-  const hhDate = hh.checked_at && new Date(hh.checked_at).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' });
   return <ul>
-    <li><a href="#/data/vacancies">Вакансии HH</a>{hhDate ? <>
-      {' · выборка от '}{hhDate} · {hh.vacancies} вакансий, {hh.employers} работодателей
-      {' · '}{hh.fresh ? 'свежая' : 'срок актуальности истёк'}
-      {!(hh.approved && hh.current_config) && ' · профиль или выборка требуют проверки'}
-      {hh.source === 'file' && ' · импорт из файла'}
-    </> : ' · выборки пока нет'}</li>
+    <VacancySample label="Вакансии HH" sample={hh}/>
+    {trudvsem && <VacancySample label="Работа России" sample={trudvsem}/>}
     <li>GitHub Issues · допущено {github.accepted ?? 0} · ожидают автопроверки {github.automatic_check ?? 0}
       {(github.automatic_check ?? 0) > 0 && !quality.automatic_check_enabled && ' · модель не настроена'}
       {' · наблюдение, отклонено или просрочено '}

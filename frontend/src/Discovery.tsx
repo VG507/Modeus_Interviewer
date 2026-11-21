@@ -230,7 +230,7 @@ export function Discovery({ profession, collectionRefresh, onSessionExpired }: {
         <option value="">Все источники</option>
         {Object.entries(providers).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
       </select></label>
-      <button className="secondary" onClick={() => { showPage(0); setReload(value => value + 1); }}>Обновить</button>
+      <button onClick={() => { showPage(0); setReload(value => value + 1); }}>Обновить</button>
     </div>
     <form className="panel" onSubmit={collectForProfession}>
       <h2>Поиск в GitHub</h2>

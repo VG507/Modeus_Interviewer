@@ -52,7 +52,7 @@ export function EditorData({ view, onSessionExpired }: { view: DataView; onSessi
       </>}
     </div>
     <nav className="actions data-nav" aria-label="Данные по профессии">
-      <a href="#/data/vacancies" aria-current={view === 'vacancies' ? 'page' : undefined}>Вакансии HH</a>
+      <a href="#/data/vacancies" aria-current={view === 'vacancies' ? 'page' : undefined}>Вакансии</a>
       <a href="#/data/sources" aria-current={view === 'sources' ? 'page' : undefined}>Источники</a>
     </nav>
     {profession && <ProfessionCollection key={profession} profession={profession}
@@ -64,7 +64,7 @@ export function EditorData({ view, onSessionExpired }: { view: DataView; onSessi
     <div hidden={view !== 'sources'}>
       {profession ? <Discovery key={profession} profession={profession} collectionRefresh={collectionRefresh}
         onSessionExpired={onSessionExpired}/> : profiles &&
-        <p>Добавьте профессию на вкладке «Вакансии HH», чтобы собирать источники.</p>}
+        <p>Добавьте профессию на вкладке «Вакансии», чтобы собирать источники.</p>}
     </div>
   </section>;
 }

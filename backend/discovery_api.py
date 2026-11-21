@@ -44,7 +44,7 @@ class DocumentationProfile(Schema):
 
 class CollectionRetry(Schema):
     run_id: Annotated[str, StringConstraints(min_length=36, max_length=36)]
-    source: Literal["hh", "github", "trends", "docs", "hn", "openalex", "skills"]
+    source: Literal["hh", "trudvsem", "github", "trends", "docs", "hn", "openalex", "skills"]
 
 
 class DocumentationConfig(DocumentationProfile):

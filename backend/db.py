@@ -320,6 +320,13 @@ class VacancySnapshot(Base):
     cards: Mapped[list | None] = mapped_column(JSON)
 
 
+class VacancySourceSample(Base):
+    __tablename__ = "vacancy_source_samples"
+    profession_id: Mapped[str] = mapped_column(ForeignKey("vacancy_collections.profession_id"), primary_key=True)
+    source: Mapped[str] = mapped_column(String(24), primary_key=True)
+    snapshot_id: Mapped[str] = mapped_column(ForeignKey("vacancy_snapshots.id"))
+
+
 def database(url):
     options = {"check_same_thread": False} if url.startswith("sqlite:") else {}
     engine = create_engine(url, connect_args=options, pool_pre_ping=True)

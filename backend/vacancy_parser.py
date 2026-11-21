@@ -140,6 +140,10 @@ def extract_sections(description, responsibility="", requirement=""):
 
 def replace_vacancy_sections(card, responsibility="", requirement=""):
     sections = extract_sections(card["description"], responsibility, requirement)
+    return with_sections(card, sections)
+
+
+def with_sections(card, sections):
     evidence = [item for item in card["evidence"] if item["field_path"].split(".", 1)[0] not in sections]
     for field, items in sections.items():
         for index, (quote, source) in enumerate(items):
@@ -178,13 +182,21 @@ def identity(item):
 
 def parse_vacancy(item, profession_id, profile=None):
     external_id, url = identity(item)
+    if not url:
+        return None
+    card = build_vacancy(item, profession_id, profile, external_id or url.rsplit("/", 1)[-1], url)
+    if card:
+        card["hh_id"] = external_id
+    return card
+
+
+def build_vacancy(item, profession_id, profile, vacancy_id, url):
     title = plain(item.get("name"))[:240]
     description = clean_html(item.get("description"))
     if not url or not title or not description or item.get("archived") is True:
         return None
     skills = {}
     evidence = []
-    vacancy_id = external_id or url.rsplit("/", 1)[-1]
 
     def cite(field, source, quote):
         evidence.append({"field_path": field, "source_field": source, "quote": quote,
@@ -224,7 +236,7 @@ def parse_vacancy(item, profession_id, profile=None):
     level = level_of(title)
     if level:
         cite("level", "name", title)
-    card = {"id": vacancy_id, "hh_id": external_id, "url": url, "profession_id": profession_id,
+    card = {"id": vacancy_id, "url": url, "profession_id": profession_id,
             "title": title, "description": description, "skills": list(skills),
             "level": level, "experience_band": experience, "evidence": evidence,
             "published_at": item.get("published_at"), "area_id": (item.get("area") or {}).get("id"),

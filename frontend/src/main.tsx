@@ -5,6 +5,7 @@ import { InterviewHome } from './InterviewHome';
 import { InterviewScreen } from './InterviewScreen';
 import { EditorData, type DataView } from './EditorData';
 import { CardsList, CardScreen, CatalogCard } from './Cards';
+import { ThemeToggle } from './ThemeToggle';
 import './style.css';
 
 type User = { id: string; is_editor: boolean };
@@ -71,16 +72,20 @@ function App() {
 
   return <main>
     <header className="masthead">
-      <a className="brand" href="#" aria-label="Modeus, мои интервью">MODEUS</a>
+      <span className="brand">modeus</span>
       <nav className="actions" aria-label="Разделы Modeus">
+        <a href="#">Интервью</a>
         <a href="#/catalog">Каталог</a>
         {user && <a href="#/cards">Мои карточки</a>}
         {user?.is_editor && <a href="#/review">Редактура</a>}
         {user?.is_editor && <a href="#/data" aria-current={dataView ? 'page' : undefined}>Данные</a>}
         {!user && (route === '#/catalog' || catalogId) && <a href="#">Войти</a>}
       </nav>
-      {user && <div className="account"><span>{user.is_editor ? 'Доступ редактора' : 'Доступ участника'}</span>
-        <button className="quiet" disabled={busy} onClick={logout}>Выйти</button></div>}
+      <div className="masthead-side">
+        {user && <div className="account"><span>{user.is_editor ? 'Доступ редактора' : 'Доступ участника'}</span>
+          <button className="quiet" disabled={busy} onClick={logout}>Выйти</button></div>}
+        <ThemeToggle/>
+      </div>
     </header>
     {catalogId ? <CatalogCard key={catalogId} id={catalogId}/> : route === '#/catalog' ?
       <CardsList key="catalog" scope="catalog" onSessionExpired={expireSession}/> :

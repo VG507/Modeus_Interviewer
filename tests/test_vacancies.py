@@ -165,8 +165,13 @@ def test_task_relevance_beats_stack_overlap():
     unverified = vacancy("127", description="<h3>Обязанности</h3><p>Оптимизировать отчёты PostgreSQL.</p>")
     cards = prepare_cards([noise, relevant, requirements_only, unverified], "python_backend")
     cards[-1]["evidence"] = []
-    collection = SimpleNamespace(cards=cards, updated_at=now(), profession_id="python_backend", aliases=None)
-    db = SimpleNamespace(get=lambda *_: collection, scalars=lambda *_: [collection])
+    collection = VacancyCollection(cards=cards, updated_at=now(), profession_id="python_backend", aliases=None,
+                                   approved=True, stats={}, config_version=1)
+
+    def scalars(query):
+        return [collection] if query.column_descriptions[0]["entity"] is VacancyCollection else []
+
+    db = SimpleNamespace(get=lambda *_: collection, scalars=scalars)
     state = {"facts": [{"field": "task", "text": "Медленный отчёт в Python, PostgreSQL, Docker, Redis и FastAPI."}]}
     result = sources_for_question(db, {"role": "Python backend"}, state, "decision")
     assert [hint["vacancy_id"] for hint in result] == ["125"]

@@ -19,6 +19,7 @@ from backend.discovery_fetch import Collected, CollectionError, ProviderRateLimi
 from backend.interview_schemas import Schema
 from backend.llm import structured_completion
 from backend.source_context import ReviewedExcerpt, import_excerpts, normalize, phrase_pattern
+from backend.vacancy_samples import fresh_vacancy_samples, trudvsem_samples
 
 
 OPENALEX = "https://api.openalex.org"
@@ -71,14 +72,14 @@ def canonical_doi(value):
     return value if DOI.fullmatch(value) else None
 
 
-def search_queries(profile, current, overrides=()):
+def search_queries(profile, current, overrides=(), *, trudvsem=None):
     if overrides:
         return tuple(dict.fromkeys(term.strip() for term in overrides if term.strip()))[:4]
     tasks = Counter()
-    if (profile.approved and profile.updated_at and current - profile.updated_at <= timedelta(days=14)
-            and profile.stats.get("config_version", 1) == profile.config_version):
-        for card in profile.cards:
-            tasks.update({task.strip()[:140] for task in card.get("tasks", []) if task.strip()})
+    if profile.approved:
+        for cards, _ in fresh_vacancy_samples(profile, trudvsem, current):
+            for card in cards:
+                tasks.update({task.strip()[:140] for task in card.get("tasks", []) if task.strip()})
     return (*DEFAULT_QUERIES.get(profile.profession_id, ()), *(task for task, _ in tasks.most_common(2)))[:4]
 
 
@@ -369,7 +370,8 @@ def collect_profile(sessions, settings, profession, key, overrides):
         if profile is None:
             raise CollectionError("Unknown profession")
         title = profile.title
-        queries = search_queries(profile, stamp, overrides)
+        trudvsem = trudvsem_samples(db, profession).get(profession)
+        queries = search_queries(profile, stamp, overrides, trudvsem=trudvsem)
         if not queries:
             return {"status": "skipped", "code": "OPENALEX_NO_TASKS"}
         tracked = list(db.scalars(select(DiscoveryItem).join(DiscoveryCandidate).where(

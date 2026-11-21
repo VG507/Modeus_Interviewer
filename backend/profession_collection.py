@@ -18,11 +18,13 @@ from backend.discovery_fetch import CollectionError, ProviderRateLimit
 from backend.documentation import collect_documentation, iso_time
 from backend.hn import HackerNewsUnavailable, collect_hn, profile_terms
 from backend.openalex import collect_research
-from backend.vacancy_import import FRESH_FOR, claim_collection, configured, run_collection
+from backend.trudvsem import collect_trudvsem, lock_current_profile, save_sample
+from backend.vacancy_import import claim_collection, configured, run_collection
+from backend.vacancy_samples import current_sample, sample_is_fresh, trudvsem_samples
 
 
 logger = logging.getLogger(__name__)
-SOURCES = ("hh", "github", "trends", "docs", "hn", "openalex", "skills")
+SOURCES = ("hh", "trudvsem", "github", "trends", "docs", "hn", "openalex", "skills")
 ACTIVE = {"queued", "running"}
 RETRYABLE = {"partial", "failed", "busy", "interrupted"}
 LEASE = timedelta(minutes=2)
@@ -72,16 +74,28 @@ def start(db, profession, retry_id=None, source=None):
 
 def change_steps(sessions, profession, run_id, changes):
     with sessions.begin() as db:
+        trudvsem = changes.get("trudvsem", {})
+        sample = trudvsem.get("sample")
+        if sample:
+            cards, stats = sample
+            step = {key: value for key, value in trudvsem.items() if key != "sample"}
+            if not lock_current_profile(db, profession, stats["config_version"]):
+                sample = None
+                step = {"status": "failed", "code": "TRUDVSEM_SUPERSEDED"}
+            changes = {**changes, "trudvsem": step}
         run = db.get(ProfessionCollectionRun, profession)
         current = now()
         if run is None or run.run_id != run_id or run.lease_until is None or run.lease_until <= current:
             return False
         steps = {**run.steps, **changes}
         lease_until = current + LEASE if any(value["status"] in ACTIVE for value in steps.values()) else None
-        return bool(db.execute(update(ProfessionCollectionRun).where(
+        changed = db.execute(update(ProfessionCollectionRun).where(
             ProfessionCollectionRun.profession_id == profession, ProfessionCollectionRun.run_id == run_id,
             ProfessionCollectionRun.lease_until > current,
-        ).values(steps=steps, lease_until=lease_until)).rowcount)
+        ).values(steps=steps, lease_until=lease_until)).rowcount
+        if changed and sample:
+            save_sample(db, profession, run_id, current, cards, stats)
+        return bool(changed)
 
 
 def refresh_sources(sessions, settings, profession, run_id, only=None):
@@ -115,6 +129,8 @@ def refresh_sources(sessions, settings, profession, run_id, only=None):
 
 
 def refresh_source(sessions, settings, profession, source):
+    if source == "trudvsem":
+        return collect_trudvsem(sessions, settings, profession)
     if source == "skills":
         return collect_skills(sessions, settings, profession)
     if source == "openalex":
@@ -176,11 +192,22 @@ def quality(db, profession, settings):
         "checked_at": iso_time(stamp),
         "vacancies": profile.stats.get("vacancies", 0),
         "employers": profile.stats.get("employers", 0),
-        "fresh": bool(stamp and current - stamp <= FRESH_FOR),
+        "fresh": sample_is_fresh(stamp, current),
         "approved": profile.approved,
-        "current_config": profile.stats.get("config_version", 1) == profile.config_version,
+        "current_config": current_sample(profile.stats, profile),
         "source": profile.stats.get("source"),
     }, "automatic_check_enabled": bool(settings.llm_base_url and settings.llm_model)}
+    trudvsem = trudvsem_samples(db, profession, include_cards=False).get(profession)
+    if trudvsem:
+        result["trudvsem"] = {
+            "checked_at": iso_time(trudvsem.collected_at),
+            "vacancies": trudvsem.stats["vacancies"],
+            "employers": trudvsem.stats["employers"],
+            "fresh": sample_is_fresh(trudvsem.collected_at, current),
+            "approved": profile.approved,
+            "current_config": current_sample(trudvsem.stats, profile),
+            "source": "trudvsem",
+        }
     # Read only evidence state, irrespective of the current page or list filter.
     fields = (DiscoveryItem.provider, DiscoveryCandidate.status, DiscoveryCandidate.reviewed_digest == DiscoveryItem.digest,
               DiscoveryCandidate.valid_until <= current, DiscoveryCandidate.valid_until.is_(None),

@@ -5,6 +5,7 @@ const experiences = {
   noExperience: 'Без опыта', between1And3: '1–3 года', between3And6: '3–6 лет', moreThan6: 'Более 6 лет',
 };
 const levels = { junior: 'Junior', middle: 'Middle', senior: 'Senior', lead: 'Lead' };
+const sources = { hh: 'HH', trudvsem: 'Работа России', file: 'Импорт из файла' };
 const errors: Record<string, string> = {
   HH_NOT_CONFIGURED: 'Укажи параметры HH в .env и перезапусти сервер.',
   HH_ALREADY_RUNNING: 'Для этого профиля уже идёт сбор.',
@@ -25,6 +26,7 @@ const errors: Record<string, string> = {
 
 type Vacancy = {
   id: string; title: string; url: string; tasks: string[]; requirements?: string[]; conditions: string[]; skills: string[];
+  source: keyof typeof sources;
   level: keyof typeof levels | null; experience_band: keyof typeof experiences | null;
   evidence: { field_path: string; source_field: string; quote: string }[];
 };
@@ -39,9 +41,10 @@ type Profile = {
   progress: { stage: keyof typeof stages; target: number; accepted: number; details_fetched: number;
     details_reused: number; reported_at: string } | null;
   stats: { vacancies?: number; employers?: number; source?: 'hh' | 'file'; details_fetched?: number; details_reused?: number };
+  trudvsem?: { updated_at: string; vacancies: number; employers: number; stale: boolean; current_config: boolean } | null;
 };
 type Overview = { configured: boolean; profiles: Profile[] };
-type Listings = { cards: Vacancy[]; stats: Profile['stats'] };
+type Listings = { cards: Vacancy[]; total: number };
 type Candidate = { role: string; interviews: number };
 type ProfileDraft = { id?: string; title: string; search_query: string; aliases: string };
 
@@ -65,6 +68,7 @@ export function Vacancies({ profile, collectionRefresh, onProfileSaved, onSessio
 }) {
   const [experience, setExperience] = useState('');
   const [level, setLevel] = useState('');
+  const [source, setSource] = useState('');
   const [overview, setOverview] = useState<Overview>();
   const [listings, setListings] = useState<{ key: string; data: Listings }>();
   const [refresh, setRefresh] = useState(0);
@@ -76,12 +80,14 @@ export function Vacancies({ profile, collectionRefresh, onProfileSaved, onSessio
   const [candidates, setCandidates] = useState<Candidate[]>();
   const [candidateError, setCandidateError] = useState('');
   const selected = overview?.profiles.find(item => item.id === profile);
-  const revision = selected?.updated_at;
+  const hasSample = !!(selected?.updated_at || selected?.trudvsem?.updated_at);
+  const revision = `${selected?.updated_at ?? ''}/${selected?.trudvsem?.updated_at ?? ''}`;
   const lastProgress = selected?.progress?.reported_at ?? selected?.started_at;
   const waitingForProgress = !!lastProgress && Date.now() - Date.parse(lastProgress) > 60_000;
   const params = new URLSearchParams({ profession_id: profile });
   if (experience) params.set('experience_band', experience);
   if (level) params.set('level', level);
+  if (source) params.set('source', source);
   const query = params.toString();
   const collection = listings?.key === query ? listings.data : undefined;
 
@@ -113,7 +119,7 @@ export function Vacancies({ profile, collectionRefresh, onProfileSaved, onSessio
   }, [refresh, collectionRefresh, onSessionExpired]);
 
   useEffect(() => {
-    if (!revision) return;
+    if (!hasSample) return;
     const controller = new AbortController();
     let timer: number | undefined;
     setListError('');
@@ -134,7 +140,7 @@ export function Vacancies({ profile, collectionRefresh, onProfileSaved, onSessio
     }
     void load();
     return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [query, revision, refresh, onSessionExpired]);
+  }, [query, hasSample, revision, refresh, onSessionExpired]);
 
   async function collect() {
     setBusy(true);
@@ -246,12 +252,16 @@ export function Vacancies({ profile, collectionRefresh, onProfileSaved, onSessio
         <div className="vacancy-filters">
           <Filter id="market-experience" label="Опыт" choices={experiences} value={experience} onChange={setExperience}/>
           <Filter id="market-level" label="Уровень" choices={levels} value={level} onChange={setLevel}/>
+          <Filter id="market-source" label="Источник" choices={sources} value={source} onChange={setSource}/>
         </div>
-        {selected.updated_at && <p>Выборка от {dateFormat.format(new Date(selected.updated_at))}. {' '}
+        {selected.updated_at && <p>{selected.stats.source === 'file' ? 'Импорт из файла' : 'HH'} · Выборка от {dateFormat.format(new Date(selected.updated_at))}. {' '}
           Работодателей: {selected.stats.employers ?? 0}.
-          {selected.stats.source === 'file' && ' Импорт из файла.'}
           {selected.stats.details_fetched !== undefined && ` Описаний загружено: ${selected.stats.details_fetched}. Из кэша: ${selected.stats.details_reused ?? 0}.`}</p>}
-        {selected.stale && <p>Сводка старше 14 дней. Интервью пока её не использует.</p>}
+        {selected.stale && <p>Срок актуальности выборки {selected.stats.source === 'file' ? 'из файла' : 'HH'} истёк.</p>}
+        {selected.trudvsem && <p>Работа России · Выборка от {dateFormat.format(new Date(selected.trudvsem.updated_at))}. {' '}
+          Вакансий: {selected.trudvsem.vacancies}. Работодателей: {selected.trudvsem.employers}.
+          {selected.trudvsem.stale && ' Срок актуальности истёк.'}
+          {!selected.trudvsem.current_config && ' Выборка собрана по предыдущим настройкам.'}</p>}
         {selected.running && <div className="market-progress" role="status">
           <span className="market-spinner" aria-hidden="true"/>
           <div><strong>{stages[selected.progress?.stage ?? 'queued']}</strong>
@@ -266,7 +276,7 @@ export function Vacancies({ profile, collectionRefresh, onProfileSaved, onSessio
         {!selected.approved && !selected.review_ready && <p>Для подключения к интервью собери свежую выборку по текущим настройкам.</p>}
         <div className="actions">
           <button disabled={busy || selected.running || !!connectionError || !overview.configured} onClick={() => void collect()}>
-            {selected.approved ? 'Обновить вакансии' : 'Собрать пробную выборку'}
+            {selected.approved ? 'Обновить вакансии HH' : 'Собрать пробную выборку HH'}
           </button>
           <button className="secondary" type="button" disabled={busy || selected.running} onClick={() => {
             setActionError('');
@@ -279,19 +289,21 @@ export function Vacancies({ profile, collectionRefresh, onProfileSaved, onSessio
         </div>
       </section>
       {listError && <p role="alert">{listError}</p>}
-      {!selected.updated_at && <p>{selected.running ? 'Первая выборка появится после завершения сбора.'
+      {!hasSample && <p>{selected.running ? 'Первая выборка появится после завершения сбора.'
         : selected.error ? 'Сохранённой выборки пока нет.' : 'Сбор для этого профиля ещё не запускался.'}</p>}
-      {selected.updated_at && !collection && !listError && <p role="status">Загружаем вакансии…</p>}
-      {selected.updated_at && collection && <p className="market-muted">Показано {collection.cards.length} из {collection.stats.vacancies ?? 0} вакансий</p>}
-      {selected.updated_at && collection?.cards.length === 0 && <p>По текущим фильтрам совпадений нет.</p>}
-      {selected.updated_at && collection?.cards.map(card => <article className="panel" key={card.id}>
+      {hasSample && !collection && !listError && <p role="status">Загружаем вакансии…</p>}
+      {hasSample && collection && <p className="market-muted">Показано {collection.cards.length} из {collection.total} вакансий</p>}
+      {hasSample && collection?.cards.length === 0 && <p>По текущим фильтрам совпадений нет.</p>}
+      {hasSample && collection?.cards.map(card => <article className="panel" key={card.id}>
         <h2><a className="card-link" href={card.url} target="_blank" rel="noreferrer">{card.title}</a></h2>
+        <p className="meta">{sources[card.source]}</p>
         {(card.experience_band || card.level) && <p>{[card.experience_band && experiences[card.experience_band],
           card.level && levels[card.level]].filter(Boolean).join(' · ')}</p>}
         {card.tasks.length > 0 && <div><strong>Рабочие задачи</strong><ul>{card.tasks.map((task, index) => {
           const source = card.evidence.find(item => item.field_path === `tasks.${index}` && item.quote === task);
           return <li key={task}>«{task}» {source && <a className="market-muted" href={card.url} target="_blank" rel="noreferrer">
-            {source.source_field === 'description' ? 'Описание на HH' : 'Фрагмент из выдачи HH'}
+            {card.source === 'trudvsem' ? 'Описание на портале' :
+              source.source_field === 'description' ? 'Описание на HH' : 'Фрагмент из выдачи HH'}
           </a>}</li>;
         })}</ul></div>}
         {!!card.requirements?.length && <div><strong>Требования к кандидату</strong>

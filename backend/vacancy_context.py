@@ -6,8 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import load_only
 
 from backend.db import VacancyCollection, now
-from backend.vacancy_import import FRESH_FOR
 from backend.vacancy_parser import canonical_skill, level_of, profile_matches, skill_hits
+from backend.vacancy_samples import fresh_vacancy_samples, trudvsem_samples
 
 
 QUESTION_INTENTS = {"action", "decision", "verification", "context"}
@@ -68,8 +68,10 @@ def sources_for_question(db, intake, state, intent, *, profession_id=None):
     if profession_id is None:
         return []
     collection = db.get(VacancyCollection, profession_id)
-    if not collection or not collection.updated_at or now() - collection.updated_at > FRESH_FOR:
+    if not collection or not collection.approved:
         return []
+    trudvsem = trudvsem_samples(db, profession_id).get(profession_id)
+    dated_cards = ((card, stamp) for cards, stamp in fresh_vacancy_samples(collection, trudvsem, now()) for card in cards)
 
     task_text = "\n".join(fact["text"][:500] for fact in state["facts"] if fact["field"] == "task")
     case_text = task_text + "\n" + "\n".join(fact["text"][:500] for fact in state["facts"][-14:] if fact["field"] != "task")
@@ -79,7 +81,7 @@ def sources_for_question(db, intake, state, intent, *, profession_id=None):
     case_skills = {skill for skill, _ in skill_hits(case_text)}
     level = level_of(intake.get("role", ""))
     matches = []
-    for card in collection.cards:
+    for card, stamp in dated_cards:
         if level and card["level"] and level != card["level"]:
             continue
         if not years_fit(intake.get("experience", ""), card["experience_band"]):
@@ -103,11 +105,19 @@ def sources_for_question(db, intake, state, intent, *, profession_id=None):
         if not (signal_overlap or case_overlap >= 2):
             continue
         matches.append(((*score, len(matching_skills)), {
-            "vacancy_id": card["id"], "url": card["url"], "snapshot_at": collection.updated_at.isoformat() + "Z",
+            "vacancy_id": card["id"], "url": card["url"], "snapshot_at": stamp.isoformat() + "Z",
             "profession_id": collection.profession_id, "title": card["title"], "source_field": source_field,
             "task_excerpt": task[:220], "skills": matching_skills[:6],
         }))
     ranked = sorted(matches, key=lambda pair: pair[0], reverse=True)
     if ranked and ranked[0][0][0]:
         ranked = [pair for pair in ranked if pair[0][0]]
-    return [hint for _, hint in ranked[:2]]
+    hints, seen_quotes = [], set()
+    for _, hint in ranked:
+        quote = " ".join(hint["task_excerpt"].casefold().split())
+        if quote not in seen_quotes:
+            seen_quotes.add(quote)
+            hints.append(hint)
+            if len(hints) == 2:
+                break
+    return hints

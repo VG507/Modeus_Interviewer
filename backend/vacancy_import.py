@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 REQUEST_INTERVAL = timedelta(milliseconds=334)
 RUN_TIMEOUT = timedelta(hours=1)
 RUN_LEASE = timedelta(minutes=5)
-FRESH_FOR = timedelta(days=14)
 SAMPLE_SIZE = 50
 PERIOD_DAYS = 30
 DETAILS_TTL = timedelta(hours=24)

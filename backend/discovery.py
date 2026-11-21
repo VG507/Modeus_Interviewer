@@ -20,6 +20,7 @@ from backend.db import (
 from backend.discovery_fetch import CollectionError, REPO_NAME, github_issues, repository_trends
 from backend.source_context import ReviewedExcerpt, import_excerpts
 from backend.vacancy_parser import canonical_skill, skill_hits
+from backend.vacancy_samples import trudvsem_samples
 
 
 DEFAULT_REPOS = ("sqlalchemy/sqlalchemy", "celery/celery")
@@ -163,10 +164,10 @@ def item_entry(db, profession, item_id):
     return item, db.get(DiscoveryCandidate, (item_id, profession))
 
 
-def vacancy_overlap(profile, item):
+def vacancy_overlap(cards, item):
     fragments = item.payload.get("fragments", {}).values()
     technologies = {skill for skill, _ in skill_hits(item.title + "\n" + "\n".join(f["text"] for f in fragments))}
-    return {skill: sum(skill in set(map(canonical_skill, card["skills"])) for card in profile.cards)
+    return {skill: sum(skill in set(map(canonical_skill, card["skills"])) for card in cards)
             for skill in sorted(technologies)}
 
 
@@ -209,8 +210,11 @@ def candidate_output(db, item, candidate, *, include_text=False):
         output["weekly_star_change"] = item.payload["stars"] - previous.stars if previous and not item.payload.get("unavailable") else None
     if include_text:
         profile = db.get(VacancyCollection, candidate.profession_id)
-        output["vacancy_sample"] = {"size": len(profile.cards), "updated_at": profile.updated_at,
-                                    "technology_mentions": vacancy_overlap(profile, item)}
+        sample = trudvsem_samples(db, candidate.profession_id).get(candidate.profession_id)
+        cards = [*profile.cards, *(sample.cards or [])] if sample else profile.cards
+        dates = [stamp for stamp in (profile.updated_at, sample.collected_at if sample else None) if stamp]
+        output["vacancy_sample"] = {"size": len(cards), "updated_at": max(dates, default=None),
+                                    "technology_mentions": vacancy_overlap(cards, item)}
         output["payload"] = ({key: value for key, value in item.payload.items() if key != "sections"}
                              if item.provider == "openalex" else item.payload)
         if item.provider == "docs":

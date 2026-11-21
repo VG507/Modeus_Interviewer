@@ -1,4 +1,4 @@
-"""Editor access to HH collections and manual refresh."""
+"""Editor access to vacancy collections and manual HH refresh."""
 
 from collections import Counter
 from datetime import timedelta
@@ -13,12 +13,14 @@ from sqlalchemy.orm import load_only
 
 from backend.db import InterviewSession, VacancyCollection, now
 from backend.interview_api import Actor, utc
-from backend.vacancy_import import FRESH_FOR, claim_collection, collection_available, configured, run_collection
+from backend.vacancy_import import claim_collection, collection_available, configured, run_collection
 from backend.vacancy_parser import profile_matches, role_key
+from backend.vacancy_samples import FRESH_FOR, current_sample, sample_is_fresh, trudvsem_samples
 
 router = APIRouter(prefix="/api/v1/vacancies")
 Experience = Literal["noExperience", "between1And3", "between3And6", "moreThan6"]
 Level = Literal["junior", "middle", "senior", "lead"]
+VacancySource = Literal["hh", "file", "trudvsem"]
 RoleText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
 
 
@@ -70,6 +72,7 @@ def collection_status(collection, current):
 def overview(request: Request, actor: Actor):
     require_editor(actor)
     with request.app.state.sessions() as db:
+        samples = trudvsem_samples(db, include_cards=False)
         rows = db.scalars(select(VacancyCollection).options(load_only(
             VacancyCollection.profession_id, VacancyCollection.updated_at, VacancyCollection.started_at,
             VacancyCollection.run_id, VacancyCollection.lease_until, VacancyCollection.error,
@@ -82,17 +85,30 @@ def overview(request: Request, actor: Actor):
             "configured": configured(request.app.state.settings),
             "profiles": [{"id": row.profession_id, "title": row.title, "search_query": row.search_query,
                           "aliases": row.aliases, "approved": row.approved,
-                          "review_ready": review_ready(row, current), **collection_status(row, current),
+                          "review_ready": review_ready(row, current, samples.get(row.profession_id)),
+                          **collection_status(row, current),
+                          "trudvsem": trudvsem_status(samples.get(row.profession_id), row, current),
                           "stats": {field: value for field, value in row.stats.items()
                                     if field in {"vacancies", "employers", "source", "details_fetched", "details_reused"}}}
                          for row in rows],
         }
 
 
-def review_ready(row, current):
+def trudvsem_status(sample, profile, current):
+    if sample is None:
+        return None
+    return {"updated_at": utc(sample.collected_at), "vacancies": sample.stats["vacancies"],
+            "employers": sample.stats["employers"], "stale": not sample_is_fresh(sample.collected_at, current),
+            "current_config": current_sample(sample.stats, profile)}
+
+
+def review_ready(row, current, trudvsem=None):
     status = collection_status(row, current)
-    return bool(not status["running"] and row.updated_at and not status["stale"]
-                and row.stats.get("vacancies") and row.stats.get("config_version", 1) == row.config_version)
+    return not status["running"] and (
+        bool(row.stats.get("vacancies") and sample_is_fresh(row.updated_at, current) and current_sample(row.stats, row))
+        or bool(trudvsem and trudvsem.stats.get("vacancies") and sample_is_fresh(trudvsem.collected_at, current)
+                and current_sample(trudvsem.stats, row))
+    )
 
 
 @router.get("/candidates")
@@ -167,8 +183,10 @@ def review_profile(profession_id: str, body: ProfileReview, request: Request, ac
         )])
         if row is None:
             raise HTTPException(404, "PROFILE_NOT_FOUND")
-        if body.approved and not review_ready(row, now()):
-            raise HTTPException(409, "PROFILE_REVIEW_NOT_READY")
+        if body.approved:
+            trudvsem = trudvsem_samples(db, profession_id, include_cards=False).get(profession_id)
+            if not review_ready(row, now(), trudvsem):
+                raise HTTPException(409, "PROFILE_REVIEW_NOT_READY")
         statement = update(VacancyCollection).where(VacancyCollection.profession_id == profession_id)
         if body.approved:
             statement = statement.where(VacancyCollection.config_version == row.config_version,
@@ -181,7 +199,8 @@ def review_profile(profession_id: str, body: ProfileReview, request: Request, ac
 
 @router.get("")
 def vacancies(request: Request, actor: Actor, profession_id: str = "python_backend",
-              experience_band: Experience | None = None, level: Level | None = None):
+              experience_band: Experience | None = None, level: Level | None = None,
+              source: VacancySource | None = None):
     require_editor(actor)
     with request.app.state.sessions() as db:
         collection = db.get(VacancyCollection, profession_id, options=[load_only(
@@ -190,6 +209,12 @@ def vacancies(request: Request, actor: Actor, profession_id: str = "python_backe
         )])
         if collection is None:
             raise HTTPException(404, "PROFILE_NOT_FOUND")
+        original_source = collection.stats.get("source") or "hh"
+        cards = [(card, original_source) for card in collection.cards if source in {None, original_source}]
+        if source in {None, "trudvsem"}:
+            sample = trudvsem_samples(db, profession_id).get(profession_id)
+            if sample:
+                cards.extend((card, "trudvsem") for card in sample.cards or [])
         return {
             "configured": configured(request.app.state.settings),
             "profiles": [{"id": key, "title": title} for key, title in db.execute(select(
@@ -197,8 +222,9 @@ def vacancies(request: Request, actor: Actor, profession_id: str = "python_backe
             ).order_by(VacancyCollection.title))],
             **collection_status(collection, now()),
             "stats": collection.stats,
-            "cards": [{key: value for key, value in card.items() if key != "description"}
-                      for card in collection.cards
+            "total": len(cards),
+            "cards": [{**{key: value for key, value in card.items() if key != "description"}, "source": provider}
+                      for card, provider in cards
                       if (experience_band is None or card["experience_band"] == experience_band)
                       and (level is None or card["level"] == level)],
         }

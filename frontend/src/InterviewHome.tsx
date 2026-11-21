@@ -8,6 +8,7 @@ const statusLabels = {
 };
 
 const dateFormat = new Intl.DateTimeFormat('ru', { dateStyle: 'medium', timeStyle: 'short' });
+const previewCount = 6;
 const projectFields: [keyof ProjectContext, string][] = [
   ['task', 'Задача проекта'], ['period', 'Период'], ['role', 'Ваша роль в проекте'],
   ['responsibility', 'За что вы отвечали'], ['stack', 'Стек'], ['constraints', 'Ограничения'],
@@ -21,6 +22,7 @@ export function InterviewHome({ onOpen, onSessionExpired }: {
   const [actionError, setActionError] = useState('');
   const [attempt, retry] = useState(0);
   const [projectCount, setProjectCount] = useState(1);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
   const [busy, setBusy] = useState<'create' | 'more'>();
   const execute = useRef(commandKeys());
   const lock = useRef(false);
@@ -101,6 +103,10 @@ export function InterviewHome({ onOpen, onSessionExpired }: {
   </section>;
   if (!page) return <p role="status">Загружаем интервью…</p>;
 
+  const sorted = [...page.items].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  const visible = historyExpanded ? sorted : sorted.slice(0, previewCount);
+  const showHistoryToggle = historyExpanded || sorted.length > previewCount || !!page.next_cursor;
+
   return <div className="workspace">
     <form className="panel" onSubmit={create} aria-labelledby="new-title">
       <h2 id="new-title">Новое интервью</h2>
@@ -133,15 +139,19 @@ export function InterviewHome({ onOpen, onSessionExpired }: {
     </form>
     <section className="panel saved" aria-labelledby="saved-title">
       <h2 id="saved-title">Мои интервью</h2>
-      {page.items.length === 0 ? <p>Сохранённых интервью пока нет.</p>
-        : <ul>{[...page.items].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).map(session =>
+      {sorted.length === 0 ? <p>Сохранённых интервью пока нет.</p>
+        : <ul>{visible.map(session =>
           <li key={session.id}><a href={`#/interviews/${session.id}`}>
             <strong>{session.current_topic_title ?? 'Интервью'}</strong>
             <span>{session.context.role} · {statusLabels[session.status]}</span>
             <time dateTime={session.updated_at}>{dateFormat.format(new Date(session.updated_at))}</time>
           </a></li>)}</ul>}
-      {page.next_cursor && <button className="secondary" disabled={!!busy} onClick={loadMore}>
+      {historyExpanded && page.next_cursor && <button className="secondary" disabled={!!busy} onClick={loadMore}>
         {busy === 'more' ? 'Загружаем…' : 'Загрузить ещё'}
+      </button>}
+      {showHistoryToggle && <button className={historyExpanded ? 'quiet' : 'secondary'} aria-expanded={historyExpanded}
+        onClick={() => setHistoryExpanded(current => !current)}>
+        {historyExpanded ? 'Скрыть' : 'Посмотреть больше'}
       </button>}
     </section>
     {actionError && <p className="workspace-error" role="alert">{actionError}</p>}

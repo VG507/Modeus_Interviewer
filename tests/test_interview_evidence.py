@@ -287,6 +287,24 @@ def test_case_with_facts_asks_once_more_after_two_broad_replies():
     assert interview_engine.choose_intent(empty) == "alternative"
 
 
+@pytest.mark.parametrize("intent", ["decision", "verification"])
+def test_question_does_not_assume_a_method_or_success(monkeypatch, intent):
+    sent = {}
+
+    async def model(settings, schema, instructions, payload):
+        sent.update(instructions=instructions, goal=payload["goal"])
+        return schema(text="Без вопроса.")
+
+    monkeypatch.setattr(interview_engine, "ask_model", model)
+    result = asyncio.run(interview_engine.formulate_question(
+        None, "Тестирование", intent, {"text": "Я тестировал баги и всё сломалось"}, CaseState().model_dump()))
+    assert result.text == interview_engine.FALLBACK_QUESTIONS[intent]
+    for word in ("способ", "вариант", "помог", "стало лучше", "измер"):
+        assert word not in result.text
+    for phrase in ("описанный способ", "помогло", "измеряли"):
+        assert phrase not in sent["goal"] and phrase not in sent["instructions"]
+
+
 def test_long_followup_is_replaced_with_a_clear_question(monkeypatch):
     async def model(settings, schema, instructions, payload):
         return schema(text="Слушаю, вы говорили, что отчёт грузился минуту — " + "это значит, что процесс шёл, " * 8

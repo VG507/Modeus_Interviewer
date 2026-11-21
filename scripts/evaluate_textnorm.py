@@ -29,6 +29,7 @@ GOLD = [
     ("PostgreSQL", "postgresql"),
     ("postgres", "postgresql"),
     ("постгрес", "postgresql"),
+    ("Postgres DB", "postgresql"),
     ("PostgrSQL", "postgresql"),  # typo
     ("postgre", "postgresql"),
     ("psql", "postgresql"),
@@ -39,12 +40,16 @@ GOLD = [
     ("TypeScrip", "typescript"),  # typo
     ("Node.js", "node.js"),
     ("NodeJS", "node.js"),
+    ("Node", "node.js"),
+    ("нода", "node.js"),
     ("React", "react"),
     ("React.JS", "react"),
     ("reactjs", "react"),
     ("Vue.js", "vue"),
+    ("vue3", "vue"),
     ("Kubernetes", "kubernetes"),
     ("k8s", "kubernetes"),
+    ("Kubernetes (k8s)", "kubernetes"),
     ("Kubernets", "kubernetes"),  # typo
     ("кубер", "kubernetes"),
     ("Docker", "docker"),
@@ -76,14 +81,17 @@ GOLD = [
     ("Prometheus", "prometheus"),
     ("MySQL", "mysql"),
     ("Angular", "angular"),
+    ("AngularJS", "angular"),
     ("HTML", "html"),
+    ("HTML5", "html"),
     ("CSS", "css"),
+    ("CSS3", "css"),
     ("SQL", "sql"),
     ("Pytest", "pytest"),
     ("Selenium", "selenium"),
     ("Celery", "celery"),
     ("ClickHouse", "clickhouse"),  # unknown skill survives cleaned
-    ("Golang", "golang"),  # unknown skill survives cleaned
+    ("Golang", "go"),
     ("go", "go"),  # too short for fuzzy, kept as-is
     ("java", "java"),  # must NOT merge into javascript
     # Garbage that must be rejected

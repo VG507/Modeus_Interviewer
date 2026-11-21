@@ -1,4 +1,5 @@
 from backend.textnorm import BLACKLIST, canonical_skill, clean_key
+from backend.vacancy_parser import skill_hits
 
 
 class TestCleanKey:
@@ -68,3 +69,18 @@ class TestCanonicalSkill:
     def test_unknown_skills_survive_cleaned(self):
         assert canonical_skill("ClickHouse") == "clickhouse"
         assert canonical_skill("Apache Kafka") == "apache kafka"
+
+    def test_version_and_bracket_variants(self):
+        assert canonical_skill("HTML5") == "html"
+        assert canonical_skill("CSS3") == "css"
+        assert canonical_skill("vue3") == "vue"
+        assert canonical_skill("AngularJS") == "angular"
+        assert canonical_skill("Kubernetes (k8s)") == "kubernetes"
+        assert canonical_skill("Postgres DB") == "postgresql"
+        assert canonical_skill("Golang") == "go"
+
+    def test_ambiguous_labels_stay_out_of_free_text(self):
+        assert canonical_skill("Node") == "node.js"
+        assert canonical_skill("нода") == "node.js"
+        assert list(skill_hits("Kubernetes: node pool, обновление node")) == [("kubernetes", "Kubernetes")]
+        assert list(skill_hits("Пишем на Node.js")) == [("node.js", "Node.js")]

@@ -13,12 +13,15 @@ from rapidfuzz import fuzz, process
 
 SKILL_ALIASES = {
     "python": ("python", "python3", "py3", "пайтон", "питон"),
-    "postgresql": ("postgresql", "postgres", "postgre", "psql", "постгрес", "постгрескл"),
+    "postgresql": ("postgresql", "postgres", "postgres db", "postgre", "psql", "постгрес", "постгрескл"),
     "javascript": ("javascript", "java script", "js", "джаваскрипт", "жс"),
     "typescript": ("typescript", "ts", "тайпскрипт"),
-    "node.js": ("node.js", "nodejs", "node", "нода"),
+    "node.js": ("node.js", "nodejs"),
     "react": ("react.js", "reactjs", "react", "реакт"),
-    "vue": ("vue.js", "vuejs", "vue"),
+    "vue": ("vue.js", "vuejs", "vue", "vue3"),
+    "angular": ("angular", "angularjs", "angular.js"),
+    "html": ("html", "html5"),
+    "css": ("css", "css3"),
     "kubernetes": ("kubernetes", "k8s", "кубернетис", "кубер"),
     "ci/cd": ("ci/cd", "ci cd", "cicd", "ci-cd"),
     "django": ("django framework", "django", "джанго"),
@@ -27,10 +30,13 @@ SKILL_ALIASES = {
     **{name: (name,) for name in (
         "sql", "fastapi", "flask", "redis", "docker", "git", "graphql", "pytest",
         "selenium", "playwright", "cypress", "postman", "linux", "ansible", "terraform", "helm",
-        "prometheus", "grafana", "nginx", "kafka", "rabbitmq", "celery", "mysql", "angular", "html", "css",
+        "prometheus", "grafana", "nginx", "kafka", "rabbitmq", "celery", "mysql",
     )},
 }
 ALIASES = {alias: skill for skill, aliases in SKILL_ALIASES.items() for alias in aliases}
+# Fine as a whole skill label, too ambiguous to search for in free text ("node pool").
+LABEL_ALIASES = {"node": "node.js", "нода": "node.js", "golang": "go"}
+LABELS = {**ALIASES, **LABEL_ALIASES}
 
 # Generic words and locations that are not skills; dropped on normalization.
 BLACKLIST = frozenset({
@@ -51,6 +57,7 @@ HOMOGLYPHS = str.maketrans({
 LATIN = re.compile(r"[a-z]")
 GARBAGE = re.compile(r"[^\w+#./ -]+", re.UNICODE)
 SPACES = re.compile(r"\s+")
+PARENTHESES = re.compile(r"\([^)]*\)")
 VERSION_SUFFIX = re.compile(r"(?<=[a-zа-я])\s+\d+(?:\.\d+){0,3}$|(?<=[a-zа-я])-(?:\d+(?:\.\d+){0,3})$")
 
 
@@ -69,20 +76,20 @@ def clean_key(value):
 def canonical_skill(label):
     """Canonical skill name, or None for blacklisted garbage.
 
-    Order: cleaned alias lookup -> version-stripped lookup -> fuzzy match
-    against known aliases. Unknown terms survive as their cleaned key.
+    Order: cleaned alias lookup -> version-stripped lookup -> lookup without
+    parentheses -> fuzzy match against known aliases. Unknown terms survive as their cleaned key.
     """
     key = clean_key(label)
     if not key or key in BLACKLIST:
         return None
-    for candidate in (key, VERSION_SUFFIX.sub("", key).strip()):
+    for candidate in (key, VERSION_SUFFIX.sub("", key).strip(), clean_key(PARENTHESES.sub(" ", str(label)))):
         if candidate in BLACKLIST:
             return None
-        skill = ALIASES.get(candidate)
+        skill = LABELS.get(candidate)
         if skill:
             return skill
     if len(key) >= FUZZY_MIN_LENGTH:
-        match = process.extractOne(key, ALIASES.keys(), scorer=fuzz.ratio, score_cutoff=FUZZY_THRESHOLD)
+        match = process.extractOne(key, LABELS.keys(), scorer=fuzz.ratio, score_cutoff=FUZZY_THRESHOLD)
         if match:
-            return ALIASES[match[0]]
+            return LABELS[match[0]]
     return key

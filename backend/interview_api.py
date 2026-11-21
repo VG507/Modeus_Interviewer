@@ -20,8 +20,7 @@ from backend.interview_schemas import (
     Identifier, InterviewView, MessageView, OPEN_TOPIC_ID, SourceQuote, TopicSummary, UpdateAnswer, VersionedRequest,
 )
 from backend.interview_worker import (
-    InvalidJob, advance_case, append_message, complete, interview_question, job_answer, job_payload, messages_for,
-    queue, valid_job,
+    InvalidJob, advance_case, append_message, complete, interview_question, job_answer, job_payload, queue, valid_job,
 )
 from backend.pagination import newest_page
 
@@ -216,9 +215,20 @@ def list_interviews(request: Request, actor: Actor, limit: PageSize = 20, cursor
 @router.get("/interviews/{interview_id}", response_model=InterviewDetail)
 def read_interview(request: Request, actor: Actor, interview_id: str):
     with request.app.state.sessions() as db:
-        interview = owned(db, interview_id, actor["id"])
-        return InterviewDetail(**interview_view(db, interview).model_dump(),
-                               messages=[message_view(item) for item in messages_for(db, interview.id)])
+        # Read the current question ID and its message in the same snapshot.
+        # A worker can commit a new question while Telegram is polling.
+        rows = db.execute(
+            select(InterviewSession, Message)
+            .outerjoin(Message, Message.session_id == InterviewSession.id)
+            .where(InterviewSession.id == interview_id, InterviewSession.owner_id == actor["id"])
+            .order_by(Message.sequence)
+        ).all()
+        if not rows:
+            raise HTTPException(404, "INTERVIEW_NOT_FOUND")
+        return InterviewDetail(
+            **interview_view(db, rows[0][0]).model_dump(),
+            messages=[message_view(message) for _, message in rows if message is not None],
+        )
 
 
 @router.post("/interviews/{interview_id}/answers", status_code=201, response_model=AnswerResult)

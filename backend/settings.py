@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     hn_collection_enabled: bool = True
     github_token: str = Field(default="", repr=False)
     openalex_api_key: str = Field(default="", repr=False)
+    telegram_bot_token: str = Field(default="", repr=False)
+    telegram_api_url: str = "https://api.telegram.org"
+    telegram_open_signup: bool = False
 
     @property
     def origin_list(self):

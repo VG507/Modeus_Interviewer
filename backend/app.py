@@ -21,6 +21,7 @@ from backend.interview_worker import run_worker
 from backend.maintenance import schedule_pruning
 from backend.security import check_password, hash_password, token_hash
 from backend.settings import Settings
+from backend.telegram_bot import run_bot
 from backend.vacancy_api import router as vacancy_router
 from backend.vacancy_import import configured, schedule_collections
 
@@ -43,6 +44,8 @@ def create_app(settings: Settings | None = None):
         if settings.documentation_weekly_enabled:
             workers.append(asyncio.create_task(schedule_documentation(sessions)))
         workers.append(asyncio.create_task(schedule_github_evidence(sessions, settings)))
+        if settings.telegram_bot_token:
+            workers.append(asyncio.create_task(run_bot(app, settings)))
         try:
             yield
         finally:

@@ -43,12 +43,6 @@ def clear_job(interview):
     interview.lease_until = None
 
 
-def messages_for(db, interview_id):
-    return list(db.scalars(
-        select(Message).where(Message.session_id == interview_id).order_by(Message.sequence)
-    ))
-
-
 def recent_history(db, interview, current_answer):
     start = interview.case_state.get("case_start_sequence")
     if start is None and not interview.case_state.get("active_topic_id"):

@@ -19,6 +19,7 @@ from backend.openalex import collect_research
 from backend.security import hash_password
 from backend.settings import Settings
 from backend.source_context import import_excerpts
+from backend.telegram_bot import INVITE_HOURS, create_invite, invite_link
 from backend.vacancy_import import claim_collection, run_collection
 
 
@@ -73,6 +74,9 @@ def main():
     user.add_argument("--editor", action="store_true")
     reset = sub.add_parser("reset-password", help="Set a new password and revoke existing sessions")
     reset.add_argument("email")
+    invite = sub.add_parser("telegram-invite", help="Create a one-time link to the Telegram bot for a user")
+    invite.add_argument("email")
+    invite.add_argument("--hours", type=number_between(1, 720), default=INVITE_HOURS)
     sub.add_parser("check-llm")
     collect = sub.add_parser("import-vacancies", help="Refresh HH vacancies for one profile")
     collect.add_argument("profession_id")
@@ -128,6 +132,16 @@ def main():
             # No exception body from HTTP clients: URLs may include credentials.
             print(str(exc) if type(exc) is RuntimeError else type(exc).__name__)
             raise SystemExit(1) from None
+        return
+    if args.command == "telegram-invite":
+        engine, sessions = database(settings.database_url)
+        try:
+            code = create_invite(sessions, args.email.strip().lower(), args.hours)
+        finally:
+            engine.dispose()
+        if code is None:
+            parser.error("User not found")
+        print(json.dumps({"start": f"/start {code}", "link": invite_link(settings, code)}))
         return
     if args.command == "import-sources":
         engine, sessions = database(settings.database_url)

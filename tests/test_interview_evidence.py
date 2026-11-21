@@ -379,3 +379,27 @@ def test_not_applicable_needs_the_speakers_words(monkeypatch, reply, kept):
     assert result.not_applicable == kept
     next_state, _ = interview_engine.apply_extraction(state, result, "a1", "get_case")
     assert interview_engine.choose_intent(next_state) is not None
+
+
+def test_actions_without_the_problem_ask_about_the_problem(monkeypatch):
+    async def classify(*args, check=None):
+        return interview_engine.DiscoverySelection(
+            facts=[{"field": "action", "sentence": 1}, {"field": "verification", "sentence": 1}],
+            ambiguous=[], not_applicable=[], refused=False, answer_fit="work_case", topic_title=None,
+        )
+
+    monkeypatch.setattr(interview_engine, "ask_model", classify)
+    state = CaseState(open_interview=True, asked_intents=["get_case"]).model_dump()
+    answer = {"id": "a1", "text": "Я отменил старые настройки кэша, после этого отчёт ускорился."}
+    evidence = asyncio.run(interview_engine.extract(None, "Что произошло?", answer, state))
+    state, _ = interview_engine.apply_extraction(state, evidence, "a1", "get_case")
+    assert interview_engine.choose_intent(state) == "clarify_task"
+    asked = {**state, "asked_intents": [*state["asked_intents"], "clarify_task"]}
+    assert interview_engine.choose_intent(asked) == "get_case"
+
+    async def malformed(*args):
+        return None
+
+    monkeypatch.setattr(interview_engine, "ask_question", malformed)
+    question = asyncio.run(interview_engine.formulate(None, "Рабочий случай", "clarify_task", answer, state))
+    assert question == interview_engine.FALLBACK_QUESTIONS["clarify_task"]

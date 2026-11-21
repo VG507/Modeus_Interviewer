@@ -272,7 +272,7 @@ def test_interview_stops_circling_without_new_cases(tmp_path, monkeypatch):
                 await send(message(user, "Ну так"))
 
         try:
-            await interview(3, "Медленный отчёт, добавил индекс", replies=2)
+            await interview(3, "Медленный отчёт, добавил индекс", replies=3)
             assert "Похоже, про случай «Медленный отчёт» главное мы выяснили" in fake.texts()[-1]
             for _ in range(6):
                 await send(message(3, "Ну так"))

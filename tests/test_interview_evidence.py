@@ -251,29 +251,40 @@ def test_followup_keeps_a_polite_two_part_question(monkeypatch, text, expected):
     assert result.text == expected
 
 
-def test_broad_reply_gets_examples_for_the_role():
-    state = {**CaseState().model_dump(), "intake": {"role": "Тестировщик"}}
+def test_broad_reply_gets_a_short_question_without_examples():
+    state = {**CaseState().model_dump(), "intake": {"role": "Тестировщик"}, "followups_without_new_information": 1}
     result = asyncio.run(interview_engine.formulate_question(None, "Рабочий случай", "rephrase", None, state))
-    assert "нестабильный автотест" in result.text
+    assert result.text == "Нужен один конкретный случай, а не работа в целом. Что тогда случилось и что вы сделали?"
     assert interview_engine.case_examples({}) == interview_engine.DEFAULT_CASE_EXAMPLES
 
 
-def test_second_clarification_shows_a_sample_answer(monkeypatch):
+def test_second_broad_reply_shows_a_sample_answer(monkeypatch):
     async def model(settings, schema, instructions, payload):
-        return schema(text="Понятно, отчёт ускорили. Как вы поняли, что стало быстрее?")
+        return schema(text="Как вы поняли, что отчёт стал строиться быстрее?")
 
     monkeypatch.setattr(interview_engine, "ask_model", model)
-    state = {**CaseState().model_dump(), "intake": {"role": "Тестировщик"}}
-    first = asyncio.run(interview_engine.formulate_question(None, "Рабочий случай", "rephrase", None, state))
+    state = {**CaseState().model_dump(), "intake": {"role": "Тестировщик"}, "followups_without_new_information": 1}
+    first = asyncio.run(interview_engine.formulate_question(None, "Рабочий случай", "alternative", None, state))
     assert "(Например" not in first.text
-    again = {**state, "followups_without_new_information": 1}
-    case = asyncio.run(interview_engine.formulate_question(None, "Рабочий случай", "rephrase", None, again))
+    again = {**state, "followups_without_new_information": 2}
+    case = asyncio.run(interview_engine.formulate_question(None, "Рабочий случай", "alternative", None, again))
     assert case.text.endswith("(Например: «Перед релизом я нашёл баг: при оплате заказ создавался дважды. "
                               "Описал шаги воспроизведения, и баг исправили до выката».)")
     check = asyncio.run(interview_engine.formulate_question(None, "Отчёт", "verification", {"text": "Стало лучше."},
                                                             again))
-    assert check.text == ("Понятно, отчёт ускорили. Как вы поняли, что стало быстрее? "
+    assert check.text == ("Как вы поняли, что отчёт стал строиться быстрее? "
                           "(Например: «Сравнил до и после на тех же данных: было 60 секунд, стало 3».)")
+
+
+def test_case_with_facts_asks_once_more_after_two_broad_replies():
+    facts = [{"id": "1", "field": "task", "text": "Медленный отчёт", "responsibility": "personal",
+              "supporting_message_ids": ["a"]}]
+    state = {**CaseState().model_dump(), "facts": facts, "asked_intents": ["get_case", "action"]}
+    assert interview_engine.choose_intent({**state, "followups_without_new_information": 2}) == "decision"
+    assert interview_engine.choose_intent({**state, "followups_without_new_information": 3}) is None
+    empty = {**CaseState().model_dump(), "asked_intents": ["get_case", "rephrase"],
+             "followups_without_new_information": 2}
+    assert interview_engine.choose_intent(empty) == "alternative"
 
 
 def test_long_followup_is_replaced_with_a_clear_question(monkeypatch):

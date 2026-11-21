@@ -13,6 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from backend.taxonomy import dictionary_coverage
 from backend.textnorm import canonical_skill
 
 GOLD = [
@@ -127,11 +128,19 @@ def main():
     rejection = rejected_ok / rejected_total if rejected_total else 1.0
     accuracy = (mapped_ok + rejected_ok) / len(GOLD)
 
+    classified, unclassified, misplaced = dictionary_coverage()
+    taxonomy_total = len(classified) + len(unclassified)
+
     print(f"gold pairs:        {len(GOLD)}")
     print(f"precision (mapped): {precision:.3f}  ({mapped_ok}/{mapped_total})")
     print(f"recall (expected):  {recall:.3f}  ({expected_ok}/{expected_total})")
     print(f"rejection (garbage):{rejection:.3f}  ({rejected_ok}/{rejected_total})")
     print(f"overall accuracy:   {accuracy:.3f}")
+    print(f"taxonomy coverage:  {len(classified)}/{taxonomy_total} canonical skills classified")
+    if unclassified:
+        print(f"  unclassified: {sorted(unclassified)}")
+    if misplaced:
+        print(f"  misplaced taxonomy entries (not canonical skills): {sorted(misplaced)}")
     if errors:
         print("mismatches:")
         print("\n".join(errors))

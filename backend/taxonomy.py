@@ -1,0 +1,76 @@
+"""Two-level taxonomy over canonical skills: category -> subcategory -> skills.
+
+Applied on top of normalization: raw terms go through canonical_skill first,
+then the canonical skill is looked up here. Unknown skills get no category.
+"""
+
+from backend.textnorm import SKILL_ALIASES, canonical_skill
+
+TAXONOMY = {
+    "languages": {
+        "general": ("python", "javascript", "typescript"),
+    },
+    "backend": {
+        "frameworks": ("django", "fastapi", "flask"),
+        "api": ("django rest framework", "rest", "graphql"),
+        "runtimes": ("node.js",),
+    },
+    "frontend": {
+        "frameworks": ("react", "vue", "angular"),
+        "markup": ("html", "css"),
+    },
+    "databases": {
+        "sql": ("postgresql", "mysql"),
+        "nosql": ("redis",),
+        "query": ("sql",),
+    },
+    "messaging": {
+        "brokers": ("kafka", "rabbitmq"),
+        "task_queues": ("celery",),
+    },
+    "devops": {
+        "containers": ("docker", "kubernetes", "helm"),
+        "iac": ("terraform", "ansible"),
+        "systems": ("linux", "nginx"),
+        "observability": ("prometheus", "grafana"),
+        "cicd": ("ci/cd",),
+    },
+    "testing": {
+        "unit": ("pytest",),
+        "e2e": ("selenium", "playwright", "cypress"),
+        "api": ("postman",),
+    },
+    "tools": {
+        "vcs": ("git",),
+    },
+}
+
+SKILL_TAXONOMY = {
+    skill: (category, subcategory)
+    for category, subcategories in TAXONOMY.items()
+    for subcategory, skills in subcategories.items()
+    for skill in skills
+}
+
+
+def skill_taxonomy(skill):
+    """(category, subcategory) for a canonical skill, or None."""
+    return SKILL_TAXONOMY.get(skill)
+
+
+def term_taxonomy(raw):
+    """(category, subcategory) for a raw term, normalized first; None if unknown."""
+    canonical = canonical_skill(raw)
+    return SKILL_TAXONOMY.get(canonical) if canonical else None
+
+
+def dictionary_coverage():
+    """(classified, unclassified, misplaced) canonical skill sets.
+
+    classified: canonical skills present in the taxonomy.
+    unclassified: canonical skills missing from the taxonomy.
+    misplaced: taxonomy entries that are not canonical skills (config error).
+    """
+    known = set(SKILL_ALIASES)
+    classified = known & SKILL_TAXONOMY.keys()
+    return classified, known - classified, set(SKILL_TAXONOMY) - known

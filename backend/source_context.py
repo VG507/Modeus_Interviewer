@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 from pydantic import Field, StringConstraints, TypeAdapter, model_validator
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 
 from backend.db import DocumentationSubscription, DiscoveryCandidate, DiscoveryItem, Source, SourceExcerpt, VacancyCollection, now
 from backend.interview_schemas import Identifier, Schema, ShortText
@@ -122,12 +122,15 @@ def sources_for_followup(db, intake, state, intent, answer_text=""):
         DocumentationSubscription.profession_id == profession_id,
         DocumentationSubscription.watch_id == DiscoveryItem.payload["watch_id"].as_string(),
     ).exists()
-    for excerpt, url in db.execute(select(SourceExcerpt, Source.url).join(Source).where(
+    evidence_date = func.coalesce(DiscoveryItem.payload["publication_date"].as_string(),
+                                  DiscoveryItem.payload["closed_at"].as_string(),
+                                  DiscoveryCandidate.assessment["checked_at"].as_string(), Source.retrieved_on)
+    for excerpt, url, dated in db.execute(select(SourceExcerpt, Source.url, evidence_date).join(Source).where(
         SourceExcerpt.profession_id == profession_id, SourceExcerpt.purpose.in_(purposes),
     ).outerjoin(DiscoveryCandidate, DiscoveryCandidate.excerpt_id == SourceExcerpt.id)
         .outerjoin(DiscoveryItem, DiscoveryItem.id == DiscoveryCandidate.item_id).where(or_(
             DiscoveryCandidate.item_id.is_(None),
-            DiscoveryItem.provider.in_(("github", "docs")) & (DiscoveryCandidate.status == "accepted")
+            DiscoveryItem.provider.in_(("github", "docs", "openalex")) & (DiscoveryCandidate.status == "accepted")
             & (DiscoveryCandidate.reviewed_digest == DiscoveryItem.digest)
             & (DiscoveryCandidate.valid_until > now()) & or_(DiscoveryItem.provider != "docs", subscribed),
         )).order_by(SourceExcerpt.id)):
@@ -142,7 +145,7 @@ def sources_for_followup(db, intake, state, intent, answer_text=""):
         if re.search(phrase_pattern(excerpt.detail), case) or re.search(phrase_pattern(excerpt.quote), case):
             continue
         score = (-purposes.index(excerpt.purpose), excerpt.kind == PREFERRED_KIND[excerpt.purpose],
-                 len(shared_signals), len(shared_words), bool(excerpt.version), len(excerpt.conditions))
+                 len(shared_signals), len(shared_words), bool(excerpt.version), len(excerpt.conditions), dated)
         matches.append((score, {
             "source_id": excerpt.source_id, "excerpt_id": excerpt.id, "profession_id": profession_id,
             "kind": excerpt.kind, "purpose": excerpt.purpose, "title": excerpt.title, "url": url,

@@ -1,5 +1,6 @@
 import asyncio
 import base64
+from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -10,11 +11,14 @@ from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
-from backend import discovery, documentation, github_evidence
+from backend import discovery, documentation, github_evidence, openalex, profession_collection
 from backend import discovery_api
 from backend.app import create_app
 from backend.auth import current_user
-from backend.db import DocumentationRevision, DiscoveryCandidate, DiscoveryItem, RepositoryObservation, SourceExcerpt, database, now
+from backend.db import (
+    DocumentationRevision, DiscoveryCandidate, DiscoveryItem, DiscoveryRevision, RepositoryObservation,
+    SourceExcerpt, VacancyCollection, database, now,
+)
 from backend.discovery_fetch import (
     Collected, CollectionError, ProviderRateLimit, fetch, github_issues, repository_trends,
 )
@@ -95,6 +99,100 @@ def test_github_token_never_follows_redirect_off_origin():
     assert seen == ["api.github.com"]
 
 
+def test_openalex_admits_grounded_research_and_removes_it_on_crossref_notice(sessions, monkeypatch):
+    doi = "10.1234/flaky"
+    published = (now() - timedelta(days=365)).date().isoformat()
+    method = "We repeatedly ran each flaky test using pytest."
+    sample = "The sample contained 40 Python projects."
+    result = "Repeated test runs detected 19 additional failures."
+    limitation = "The study covered Python projects from public repositories."
+    work = {
+        "id": "https://openalex.org/W10", "doi": f"https://doi.org/{doi}",
+        "display_name": "Flaky test detection", "publication_date": published,
+        "type": "article", "is_retracted": False, "has_content": {"grobid_xml": True},
+        "best_oa_location": {"is_oa": True, "version": "publishedVersion", "license": "cc-by"},
+    }
+    xml = f"""<TEI xmlns="http://www.tei-c.org/ns/1.0">
+      <teiHeader><fileDesc><sourceDesc><idno type="DOI">{doi}</idno></sourceDesc></fileDesc></teiHeader>
+      <text><body>
+        <div><head>Methodology</head><p>{method}</p><p>{sample}</p></div>
+        <div><head>Results</head><p>{result}</p></div>
+        <div><head>Threats to Validity</head><p>{limitation}</p></div>
+      </body></text></TEI>"""
+    real_client = httpx.Client
+    notice = False
+    mismatch = False
+
+    def upstream(request):
+        if request.url.host in {"api.openalex.org", "content.openalex.org"}:
+            assert request.headers["authorization"] == "Bearer test-key"
+            if request.url.host == "content.openalex.org":
+                assert request.url.path == "/works/W10.grobid-xml"
+                return httpx.Response(200, text=xml)
+            return httpx.Response(200, json={"results": [work, work]} if request.url.path == "/works" else work)
+        assert "authorization" not in request.headers
+        if request.url.host == "api.crossref.org":
+            if request.url.path == "/works":
+                assert request.url.params["filter"] == f"updates:{doi}"
+                return httpx.Response(200, json={"message": {"total-results": int(notice)}})
+            return httpx.Response(200, json={"message": {"DOI": doi, "type": "journal-article", "ISSN": ["1111-1111"]}})
+        assert request.url.host == "doaj.org"
+        return httpx.Response(200, json={"results": [{"id": "verified", "bibjson": {"identifier": [
+            {"type": "doi", "id": doi}, {"type": "eissn", "id": "1111-1111"},
+        ]}}]})
+
+    async def model(settings, name, schema, instructions, payload):
+        assert payload["sections"]["method"][0]["heading"] == "Methodology"
+        return {"relevant": True, "task": "flaky test detection", "quote": result,
+                "detail": "19 additional failures", "method": method, "sample": sample,
+                "conditions": ["pytest"], "limitation": "A made-up limitation." if mismatch else limitation,
+                "technology": "pytest", "version": None}
+
+    monkeypatch.setattr(openalex.httpx, "Client",
+                        lambda **kwargs: real_client(transport=httpx.MockTransport(upstream), **kwargs))
+    monkeypatch.setattr(openalex, "structured_completion", model)
+    settings = Settings(openalex_api_key="test-key", llm_base_url="http://localhost:8001/v1", llm_model="test")
+
+    def collect_for(profession):
+        return openalex.collect_research(sessions, settings, profession, overrides=("flaky test detection",))
+
+    assert collect_for("qa")["accepted"] == 1
+    mismatch = True
+    assert collect_for("python_backend")["accepted"] == 0
+    with sessions() as db:
+        item = db.scalar(select(DiscoveryItem).where(DiscoveryItem.provider == "openalex"))
+        candidate = db.get(DiscoveryCandidate, (item.id, "qa"))
+        output = discovery.candidate_output(db, item, candidate, include_text=True)
+        assert output["assessment"]["sections"]["limitation"] == "Threats to Validity"
+        assert output["payload"]["review_url"] == "https://doaj.org/article/verified"
+        assert "sections" not in output["payload"]
+        assert db.get(DiscoveryCandidate, (item.id, "python_backend")).status == "observe"
+        item_id, excerpt_id = item.id, candidate.excerpt_id
+        state = {"facts": [{"field": "task", "text": "flaky test detection using pytest"}]}
+        monkeypatch.setattr("backend.source_context.profession_for_question", lambda *_: "qa")
+        assert sources_for_followup(db, {}, state, "verification")[0]["excerpt_id"] == excerpt_id
+
+    notice = True
+    assert collect_for("qa")["accepted"] == 0
+    with sessions() as db:
+        assert db.get(DiscoveryCandidate, (item_id, "qa")).status == "rejected"
+        assert db.get(DiscoveryCandidate, (item_id, "qa")).excerpt_id == excerpt_id
+        assert db.scalar(select(func.count()).select_from(DiscoveryRevision).where(
+            DiscoveryRevision.item_id == item_id)) == 2
+        monkeypatch.setattr("backend.source_context.sources_for_question", lambda *args, **kwargs: [])
+        assert sources_for_followup(db, {}, state, "verification") == []
+
+
+def test_openalex_never_uses_abstract_or_xml_from_another_doi():
+    doi = "10.1234/right"
+    xml = b"""<TEI xmlns="http://www.tei-c.org/ns/1.0">
+      <teiHeader><idno type="DOI">10.1234/wrong</idno></teiHeader>
+      <text><front><div><head>Methods</head><p>Text only in the abstract.</p></div></front><body/></text>
+    </TEI>"""
+    assert openalex.full_text_sections(xml, doi) == {}
+    assert not any(openalex.full_text_sections(xml, "10.1234/wrong").values())
+
+
 def test_discovery_view_is_editor_only_and_filters_before_pagination(sessions):
     app = create_app()
     actor = {"id": "actor", "is_editor": False}
@@ -158,6 +256,117 @@ def test_editor_starts_collection_with_manual_terms_and_sees_rate_limit(sessions
         assert response.headers["Retry-After"] == "90"
         removed = client.post(path, headers=headers, json={**payload, "provider": "arxiv"})
         assert removed.status_code == 422
+    with sessions() as db:
+        assert db.get(VacancyCollection, "frontend").discovery_searches == {
+            "trends": {"values": ["react", "vite"], "labels": [], "limit": 7},
+        }
+
+
+def test_profession_collection_can_retry_only_failed_source(sessions, monkeypatch):
+    calls = []
+
+    def refresh(_, settings, profession, source):
+        assert profession == "python_backend"
+        calls.append(source)
+        if source == "github" and calls.count(source) == 1:
+            raise ProviderRateLimit("rate limited", 90)
+        return {"status": "ok", "collected": 1}
+
+    monkeypatch.setattr(profession_collection, "refresh_source", refresh)
+    app = create_app()
+    actor = {"id": "actor", "is_editor": False}
+    app.dependency_overrides[current_user] = lambda: actor
+    path = "/api/v1/discovery/collection/python_backend"
+    headers = {"Origin": app.state.app_origin}
+    with TestClient(app) as client:
+        assert client.get(path).status_code == 403
+        assert client.post(path, headers=headers).status_code == 403
+        actor["is_editor"] = True
+        assert client.post(path).status_code == 403
+        assert client.get(path).json()["run"] is None
+        started = client.post(path, headers=headers)
+        assert started.status_code == 202 and started.json()["running"]
+        assert sorted(calls) == sorted(profession_collection.SOURCES)
+        status = client.get(path).json()
+        run = status["run"]
+        assert not run["running"]
+        assert run["steps"]["github"] == {"status": "failed", "code": "DISCOVERY_RATE_LIMIT"}
+        assert run["steps"]["hn"]["collected"] == 1
+        assert run["steps"]["openalex"]["collected"] == 1
+        assert status["quality"]["materials"]["github"] == {}
+        retry = client.post(path, headers=headers, json={"run_id": run["id"], "source": "github"})
+        complete = client.get(path).json()["run"]
+        assert retry.status_code == 202 and complete["id"] != run["id"]
+        assert complete["steps"]["github"]["status"] == "ok"
+        assert complete["steps"]["docs"] == run["steps"]["docs"]
+        assert calls[-1] == "github" and len(calls) == len(profession_collection.SOURCES) + 1
+        stale = client.post(path, headers=headers, json={"run_id": run["id"], "source": "github"})
+        finished = client.post(path, headers=headers, json={"run_id": complete["id"], "source": "docs"})
+        for rejected in (stale, finished):
+            assert rejected.status_code == 409
+            assert rejected.json()["error"]["code"] == "COLLECTION_RETRY_UNAVAILABLE"
+        assert client.get(path).json()["run"] == complete
+        assert len(calls) == len(profession_collection.SOURCES) + 1
+
+
+def test_active_profession_run_is_reused_and_expired_run_can_be_retried(sessions, monkeypatch):
+    with sessions.begin() as db:
+        run, token = profession_collection.start(db, "python_backend")
+    with sessions.begin() as db:
+        same, duplicate = profession_collection.start(db, "python_backend")
+    assert same == run and duplicate is None
+    monkeypatch.setattr(profession_collection, "now", lambda: now() + timedelta(minutes=5))
+    with sessions.begin() as db:
+        retry, new_token = profession_collection.start(db, "python_backend", token, "github")
+    assert new_token != token
+    assert retry["steps"]["docs"]["status"] == "interrupted"
+    assert not profession_collection.change_steps(sessions, "python_backend", token, {})
+
+
+def test_parallel_github_collection_uses_the_same_database_lease(sessions, monkeypatch):
+    stamp = now()
+    monkeypatch.setattr(discovery, "now", lambda: stamp)
+    with ExitStack() as old, ExitStack() as replacement:
+        old.enter_context(discovery.collection_lease(sessions, "github"))
+        with pytest.raises(discovery.DiscoveryBusy), discovery.collection_lease(sessions, "github"):
+            pytest.fail("The same source was allowed to collect concurrently")
+        with discovery.collection_lease(sessions, "trends"):
+            pass
+        stamp += timedelta(minutes=16)
+        replacement.enter_context(discovery.collection_lease(sessions, "github"))
+        old.close()
+        with pytest.raises(discovery.DiscoveryBusy), discovery.collection_lease(sessions, "github"):
+            pytest.fail("The previous collector released the replacement's lease")
+    with discovery.collection_lease(sessions, "github"):
+        pass
+
+
+def test_new_source_revision_preserves_old_payload_and_requires_reevaluation(sessions):
+    first = Collected("github:100", "Case", "https://github.com/example/project/issues/10",
+                      {"fragments": {"body": {"text": "First description"}}})
+    changed = Collected(first.id, first.title, first.url, {"fragments": {"body": {"text": "Updated description"}}})
+    stamp = now()
+    with sessions.begin() as db:
+        discovery.collect_records(db, "github", "python_backend", [first], stamp - timedelta(minutes=1))
+        discovery.collect_records(db, "github", "qa", [first], stamp - timedelta(minutes=1))
+    with sessions.begin() as db:
+        review = db.get(DiscoveryCandidate, (first.id, "python_backend"))
+        review.status = "accepted"
+        review.reviewed_digest = discovery.item_digest(first)
+        review.valid_until = stamp + timedelta(days=1)
+    with sessions() as db:
+        assert profession_collection.quality(db, "python_backend", Settings())["materials"]["github"] == {"accepted": 1}
+    with sessions.begin() as db:
+        discovery.collect_records(db, "github", "python_backend", [changed], stamp)
+        discovery.collect_records(db, "github", "python_backend", [first], stamp - timedelta(seconds=1))
+    with sessions() as db:
+        revisions = list(db.scalars(select(DiscoveryRevision).where(DiscoveryRevision.item_id == first.id)))
+        assert {row.digest: row.payload for row in revisions} == {
+            discovery.item_digest(first): first.payload, discovery.item_digest(changed): changed.payload,
+        }
+        assert db.get(DiscoveryItem, first.id).payload == changed.payload
+        for profile in ("python_backend", "qa"):
+            assert profession_collection.quality(db, profile, Settings())["materials"]["github"] == {"automatic_check": 1}
 
 
 def test_github_collection_saves_candidates_for_automatic_check(sessions, monkeypatch):
@@ -205,13 +414,16 @@ def test_trends_fetch_once_and_compare_weekly_counters(sessions):
     one = results[0]
     today = datetime(2026, 7, 1)
     with sessions.begin() as db:
-        discovery.collect_records(db, "trends", "python_backend", results, today - timedelta(days=7))
-        discovery.collect_records(db, "trends", "python_backend", results, today - timedelta(days=7))
+        discovery.collect_records(db, "trends", "python_backend", results, today - timedelta(days=6))
+        discovery.collect_records(db, "trends", "python_backend", results, today - timedelta(days=6))
         assert discovery.list_candidates(db, "python_backend", 10)[0]["weekly_star_change"] is None
         increased = Collected(one.id, one.title, one.url, {**one.payload, "stars": 147})
         discovery.collect_records(db, "trends", "python_backend", [increased], today)
         assert discovery.list_candidates(db, "python_backend", 10)[0]["weekly_star_change"] == 17
         assert db.scalar(select(func.count()).select_from(RepositoryObservation)) == 2
+        exact = Collected(one.id, one.title, one.url, {**one.payload, "stars": 129})
+        discovery.collect_records(db, "trends", "python_backend", [exact], today - timedelta(days=7))
+        assert discovery.list_candidates(db, "python_backend", 10)[0]["weekly_star_change"] == 18
 
 
 def test_automatic_check_retries_verifies_provenance_and_invalidates_old_excerpt(sessions, monkeypatch):

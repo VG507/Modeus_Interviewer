@@ -4,11 +4,12 @@ import logging
 from typing import Annotated, Literal
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from pydantic import Field, StringConstraints, ValidationError
-from sqlalchemy import select
+from sqlalchemy import select, update
 
-from backend.db import VacancyCollection
+from backend import profession_collection
+from backend.db import ProfessionCollectionRun, VacancyCollection
 from backend.discovery import (
     DiscoveryBusy, InvalidDiscoveryQuery, candidate_output, collect, item_entry, list_candidates,
     save_documentation_review,
@@ -24,7 +25,7 @@ from backend.vacancy_api import check_profile, require_editor, require_editor_wr
 
 router = APIRouter(prefix="/api/v1/discovery")
 SearchProvider = Literal["github", "trends"]
-Provider = Literal["github", "trends", "docs"]
+Provider = Literal["github", "trends", "docs", "openalex"]
 SearchTerm = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=140)]
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,11 @@ class DiscoverySearch(Schema):
 
 class DocumentationProfile(Schema):
     profession_id: Annotated[str, StringConstraints(min_length=1, max_length=32)]
+
+
+class CollectionRetry(Schema):
+    run_id: Annotated[str, StringConstraints(min_length=36, max_length=36)]
+    source: Literal["hh", "github", "trends", "docs", "hn", "openalex"]
 
 
 class DocumentationConfig(DocumentationProfile):
@@ -66,9 +72,9 @@ def start_collection(request: Request, actor: Actor, search: DiscoverySearch):
     with sessions() as db:
         check_profile(db, search.profession_id)
     try:
-        return collect(sessions, request.app.state.settings, search.provider, search.profession_id,
-                       list(dict.fromkeys(search.values)), 2, search.limit, 100, search.labels,
-                       interactive=True)
+        values = list(dict.fromkeys(search.values))
+        result = collect(sessions, request.app.state.settings, search.provider, search.profession_id,
+                         values, 2, search.limit, 100, search.labels, interactive=True)
     except ProviderRateLimit as exc:
         headers = {"Retry-After": str(exc.retry_after)} if exc.retry_after is not None else None
         raise HTTPException(429, "DISCOVERY_RATE_LIMIT", headers=headers) from None
@@ -84,6 +90,40 @@ def start_collection(request: Request, actor: Actor, search: DiscoverySearch):
     except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
         logger.warning("Discovery collection failed for %s: %s", search.provider, type(exc).__name__)
         raise HTTPException(502, "DISCOVERY_UNAVAILABLE") from None
+    with sessions.begin() as db:
+        db.execute(update(VacancyCollection).where(VacancyCollection.profession_id == search.profession_id)
+                   .values(profession_id=search.profession_id))
+        profile = db.get(VacancyCollection, search.profession_id)
+        profile.discovery_searches = {**(profile.discovery_searches or {}), search.provider: {
+            "values": values, "limit": search.limit, "labels": search.labels,
+        }}
+    return result
+
+
+@router.get("/collection/{profession_id}")
+def collection_status(request: Request, actor: Actor, profession_id: str):
+    require_editor(actor)
+    with request.app.state.sessions() as db:
+        check_profile(db, profession_id)
+        run = profession_collection.output(db.get(ProfessionCollectionRun, profession_id))
+        return {"run": run, "quality": profession_collection.quality(db, profession_id, request.app.state.settings)}
+
+
+@router.post("/collection/{profession_id}", status_code=202)
+def collect_profession(request: Request, tasks: BackgroundTasks, actor: Actor, profession_id: str,
+                       retry: CollectionRetry | None = None):
+    require_editor_write(request, actor)
+    sessions = request.app.state.sessions
+    source = retry.source if retry else None
+    with sessions.begin() as db:
+        check_profile(db, profession_id)
+        run, token = profession_collection.start(db, profession_id, retry.run_id if retry else None, source)
+    if token:
+        tasks.add_task(profession_collection.refresh_sources, sessions, request.app.state.settings,
+                       profession_id, token, source)
+    if run is None:
+        raise HTTPException(409, "COLLECTION_RETRY_UNAVAILABLE")
+    return run
 
 
 @router.get("/profiles")

@@ -12,6 +12,7 @@ MESSAGES = {
     "ANSWER_NOT_FOUND": "Ответ не найден.",
     "CARD_NOT_FOUND": "Карточка не найдена.",
     "CARD_UNCHANGED": "В карточке нет изменений.",
+    "COLLECTION_RETRY_UNAVAILABLE": "Этот этап уже изменился. Обновите состояние сбора.",
     "CURSOR_INVALID": "Откройте первую страницу списка заново.",
     "DATABASE_UNAVAILABLE": "База данных временно недоступна.",
     "DISCOVERY_BUSY": "Сбор из этого источника уже выполняется.",

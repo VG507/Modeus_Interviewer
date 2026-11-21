@@ -1,14 +1,15 @@
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from uuid import uuid4
 
 import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from backend.app import create_app
-from backend.db import InterviewSession, KnowledgeCard, Topic, User
+from backend.db import InterviewSession, KnowledgeCard, Topic, User, now
 from backend.security import hash_password
 from backend.settings import Settings
 
@@ -169,11 +170,63 @@ def test_review_race_and_updated_consent(publication):
     assert kept["review_status"] == "unreviewed" and kept["consent"] is None
     assert guest.get(public).status_code == 404
     assert_ok(change(owner, path + "/submit-review", 5, consent=True, show_author=False))
+    assert editor.get(path).json()["original"]["content"]["actions"] == [FACT]
     assert_ok(change(editor, path + "/review", 6, decision="accept"))
-    assert guest.get(public).json()["author_name"] is None
+    public_card = guest.get(public).json()
+    assert public_card["author_name"] is None
+    assert public_card["content"] == updated["content"]
 
     with app.state.sessions.begin() as db:
         card = db.scalar(select(KnowledgeCard).where(KnowledgeCard.id == card_id))
         card.consent = {**card.consent, "content_version": card.content_version - 1}
     assert guest.get(public).status_code == 404
     assert guest.get("/api/v1/catalog").json()["items"] == []
+
+
+def test_catalog_classifies_open_roles_and_pages_from_newest(publication):
+    app, clients, (older, newer) = publication
+    with app.state.sessions.begin() as db:
+        old_card = db.get(KnowledgeCard, older)
+        old_card.created_at = now() - timedelta(days=1)
+        new_card = db.get(KnowledgeCard, newer)
+        session = db.get(InterviewSession, new_card.session_id)
+        session.topic_id = "open-interview"
+        session.context = {"role": "Frontend engineer"}
+
+    for card_id in (older, newer):
+        path = f"/api/v1/cards/{card_id}"
+        assert_ok(change(clients["owner"], path + "/submit-review", 1, consent=True, show_author=False))
+        assert_ok(change(clients["editor"], path + "/review", 2, decision="accept"))
+
+    guest = clients["guest"]
+    path = "/api/v1/catalog"
+    selects = []
+
+    def capture(_, __, statement, *args):
+        if statement.lstrip().upper().startswith("SELECT"):
+            selects.append(statement)
+
+    event.listen(app.state.engine, "before_cursor_execute", capture)
+    try:
+        listing = assert_ok(guest.get(path))
+        assert len(listing["items"]) == 2
+    finally:
+        event.remove(app.state.engine, "before_cursor_execute", capture)
+    assert len(selects) == 1
+
+    first = assert_ok(guest.get(path, params={"limit": 1}))
+    assert [item["id"] for item in first["items"]] == [newer]
+    assert first["items"][0]["profession_id"] == "frontend"
+    second = assert_ok(guest.get(path, params={"limit": 1, "cursor": first["next_cursor"]}))
+    assert [item["id"] for item in second["items"]] == [older]
+    assert second["next_cursor"] is None
+    by_profession = assert_ok(guest.get(path, params={"profession_id": "frontend"}))
+    assert [item["id"] for item in by_profession["items"]] == [newer]
+    by_topic = assert_ok(guest.get(path, params={"topic_title": "SQL"}))
+    assert [item["id"] for item in by_topic["items"]] == [older]
+    assert set(assert_ok(guest.get(path + "/topics"))["items"]) == {"SQL", "Вторая карточка"}
+
+    app.state.engine.dispose()
+    command.downgrade(Config("alembic.ini"), "0015")
+    command.upgrade(Config("alembic.ini"), "head")
+    assert assert_ok(guest.get(path, params={"profession_id": "frontend"})) == by_profession

@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import time
+from contextlib import contextmanager
 from datetime import timedelta
 from difflib import unified_diff
 from itertools import islice
@@ -14,7 +15,7 @@ from sqlalchemy import case, delete, or_, select, update
 
 from backend.db import (
     DiscoveryWindow, DocumentationRevision, DocumentationSubscription, DiscoveryCandidate, DiscoveryItem,
-    RepositoryObservation, VacancyCollection, insert_for, now,
+    DiscoveryRevision, RepositoryObservation, VacancyCollection, insert_for, now,
 )
 from backend.discovery_fetch import CollectionError, REPO_NAME, github_issues, repository_trends
 from backend.source_context import ReviewedExcerpt, import_excerpts
@@ -23,7 +24,7 @@ from backend.vacancy_parser import canonical_skill, skill_hits
 
 DEFAULT_REPOS = ("sqlalchemy/sqlalchemy", "celery/celery")
 DEFAULT_TOPICS = ("llm", "rag", "vector-database")
-ACTIVE_PROVIDERS = ("github", "trends", "docs")
+ACTIVE_PROVIDERS = ("github", "trends", "docs", "openalex")
 
 
 class InvalidDiscoveryQuery(CollectionError):
@@ -59,6 +60,8 @@ def collect_records(db, provider, profession, items, observed_at):
         replace = DiscoveryItem.observed_at <= observed_at
         insert_row(db, DiscoveryItem, {"id": item.id, "provider": provider, **state}, ["id"],
                    changes=state, condition=replace)
+        if provider in {"github", "trends", "openalex"}:
+            insert_row(db, DiscoveryRevision, {"item_id": item.id, **state}, ["item_id", "digest"])
         insert_row(db, DiscoveryCandidate, {"item_id": item.id, "profession_id": profession,
                                             "status": "observe" if provider == "trends" else "new"},
                    ["item_id", "profession_id"])
@@ -69,12 +72,8 @@ def collect_records(db, provider, profession, items, observed_at):
                        ["item_id", "day"], changes=snapshot, condition=RepositoryObservation.observed_at <= observed_at)
 
 
-def collect(sessions, settings, provider, profession, values, pages, limit, min_stars, labels=None,
-            *, interactive=False):
-    if provider not in {"github", "trends"}:
-        raise InvalidDiscoveryQuery("Unknown GitHub source")
-    if not values and profession != "python_backend":
-        raise InvalidDiscoveryQuery("Specify repositories or topics for this profession")
+@contextmanager
+def collection_lease(sessions, provider):
     token = str(uuid4())
     stamp = now()
     with sessions.begin() as db:
@@ -89,11 +88,21 @@ def collect(sessions, settings, provider, profession, values, pages, limit, min_
     if not claimed:
         raise DiscoveryBusy("Collection already running")
     try:
-        return collect_provider(sessions, settings, provider, profession, values, pages, limit, min_stars, labels,
-                                interactive=interactive)
+        yield
     finally:
         with sessions.begin() as db:
             db.execute(delete(DiscoveryWindow).where(DiscoveryWindow.provider == provider, DiscoveryWindow.token == token))
+
+
+def collect(sessions, settings, provider, profession, values, pages, limit, min_stars, labels=None,
+            *, interactive=False):
+    if provider not in {"github", "trends"}:
+        raise InvalidDiscoveryQuery("Unknown GitHub source")
+    if not values and profession != "python_backend":
+        raise InvalidDiscoveryQuery("Specify repositories or topics for this profession")
+    with collection_lease(sessions, provider):
+        return collect_provider(sessions, settings, provider, profession, values, pages, limit, min_stars, labels,
+                                interactive=interactive)
 
 
 def collect_provider(sessions, settings, provider, profession, values, pages, limit, min_stars, labels,
@@ -157,22 +166,27 @@ def vacancy_overlap(profile, item):
             for skill in sorted(technologies)}
 
 
-def candidate_output(db, item, candidate, *, include_text=False):
-    status = candidate.status if candidate.reviewed_digest == item.digest else "new"
-    if item.provider == "github" and status in {"new", "review"}:
+def candidate_status(provider, status, reviewed, expired, unavailable, revised):
+    status = status if reviewed else "new"
+    if provider == "github" and status in {"new", "review"}:
         status = "automatic_check"
-    if item.provider == "trends":
+    if provider == "trends":
         status = "observe"
-    if item.payload.get("reason"):
-        status = "rejected"
-    if status == "accepted" and candidate.valid_until and candidate.valid_until <= now():
+    if unavailable:
+        return "unavailable" if provider == "docs" else "rejected"
+    if status == "accepted" and expired:
         status = "expired"
+    if provider == "docs" and status == "new" and revised:
+        status = "review"
+    return status
+
+
+def candidate_output(db, item, candidate, *, include_text=False):
+    status = candidate_status(item.provider, candidate.status, candidate.reviewed_digest == item.digest,
+                              candidate.valid_until is None or candidate.valid_until <= now(),
+                              bool(item.payload.get("reason")), bool(item.payload.get("previous_digest")))
     reason = item.payload.get("reason") or (candidate.reason if candidate.reviewed_digest == item.digest else None)
     if item.provider == "docs":
-        if item.payload.get("reason"):
-            status = "unavailable"
-        elif status == "new" and item.payload.get("previous_digest"):
-            status = "review"
         if status == "review" and not reason:
             reason = "Официальный источник изменился и ждёт повторной проверки."
     output = {"id": item.id, "provider": item.provider, "title": item.title, "url": item.url,
@@ -193,7 +207,8 @@ def candidate_output(db, item, candidate, *, include_text=False):
         profile = db.get(VacancyCollection, candidate.profession_id)
         output["vacancy_sample"] = {"size": len(profile.cards), "updated_at": profile.updated_at,
                                     "technology_mentions": vacancy_overlap(profile, item)}
-        output["payload"] = item.payload
+        output["payload"] = ({key: value for key, value in item.payload.items() if key != "sections"}
+                             if item.provider == "openalex" else item.payload)
         if item.provider == "docs":
             output["documentation_diff"] = documentation_diff(db, item, candidate)
     return output

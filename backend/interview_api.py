@@ -6,8 +6,10 @@ from datetime import timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from pydantic import ValidationError
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import aliased
 from sqlalchemy.orm.exc import StaleDataError
 
 from backend.auth import current_user
@@ -18,7 +20,8 @@ from backend.interview_schemas import (
     Identifier, InterviewView, MessageView, OPEN_TOPIC_ID, SourceQuote, TopicSummary, UpdateAnswer, VersionedRequest,
 )
 from backend.interview_worker import (
-    InvalidJob, advance_case, append_message, complete, job_answer, job_payload, messages_for, queue, valid_job,
+    InvalidJob, advance_case, append_message, complete, interview_question, job_answer, job_payload, messages_for,
+    queue, valid_job,
 )
 from backend.pagination import newest_page
 
@@ -45,13 +48,18 @@ def message_view(message):
 
 def interview_view(db, interview):
     card_id = db.scalar(select(KnowledgeCard.id).where(KnowledgeCard.session_id == interview.id))
-    topic = db.get(Topic, interview.case_state.get("active_topic_id") or interview.topic_id)
+    state = interview.case_state if isinstance(interview.case_state, dict) else {}
+    active_id = state.get("active_topic_id")
+    topic = db.get(Topic, active_id) if active_id else None
+    if topic is None:
+        topic = db.get(Topic, interview.topic_id)
     return interview_summary(interview, card_id, topic.title if topic else None)
 
 
 def interview_summary(interview, card_id, topic_title):
+    state = interview.case_state if isinstance(interview.case_state, dict) else {}
     return InterviewView.model_validate(interview, from_attributes=True).model_copy(update={
-        "current_topic_title": interview.case_state.get("discovered_topic") or topic_title,
+        "current_topic_title": state.get("discovered_topic") or topic_title,
         "card_id": card_id, "created_at": utc(interview.created_at), "updated_at": utc(interview.updated_at),
     })
 
@@ -130,26 +138,30 @@ def require_active(interview):
         raise HTTPException(409, "INVALID_STATE")
 
 
-def require_question(interview):
+def require_question(db, interview):
     require_active(interview)
     if interview.processing_status in {"queued", "running"}:
         raise HTTPException(409, "PROCESSING_IN_PROGRESS")
     if interview.processing_status != "idle" or not interview.current_question_id:
         raise HTTPException(409, "INVALID_STATE")
+    if not isinstance(interview.case_state, dict):
+        raise HTTPException(409, "INVALID_STATE")
     intents = interview.case_state.get("asked_intents")
-    if not intents:
+    if not isinstance(intents, list) or not intents or not isinstance(intents[-1], str) or not intents[-1]:
+        raise HTTPException(409, "INVALID_STATE")
+    if interview_question(db, interview, interview.current_question_id) is None:
         raise HTTPException(409, "INVALID_STATE")
     return intents[-1]
 
 
 def find_draft(db, interview, answer_id):
-    require_question(interview)
+    current_intent = require_question(db, interview)
     answer = db.get(Message, answer_id)
     if answer is None or answer.session_id != interview.id or answer.kind != "answer":
         raise HTTPException(404, "ANSWER_NOT_FOUND")
     if answer.status != "draft" or answer.reply_to_question_id != interview.current_question_id:
         raise HTTPException(409, "INVALID_STATE")
-    return answer
+    return answer, current_intent
 
 
 def answer_result(db, interview, answer):
@@ -191,10 +203,11 @@ def create_interview(request: Request, actor: Actor, key: CommandKey, body: Crea
 @router.get("/interviews")
 def list_interviews(request: Request, actor: Actor, limit: PageSize = 20, cursor: Identifier | None = None):
     with request.app.state.sessions() as db:
-        query = (select(InterviewSession, KnowledgeCard.id, Topic.title)
+        active = aliased(Topic)
+        query = (select(InterviewSession, KnowledgeCard.id, func.coalesce(active.title, Topic.title))
                  .outerjoin(KnowledgeCard, KnowledgeCard.session_id == InterviewSession.id)
-                 .outerjoin(Topic, Topic.id == func.coalesce(
-                     InterviewSession.case_state["active_topic_id"].as_string(), InterviewSession.topic_id))
+                 .outerjoin(Topic, Topic.id == InterviewSession.topic_id)
+                 .outerjoin(active, active.id == InterviewSession.case_state["active_topic_id"].as_string())
                  .where(InterviewSession.owner_id == actor["id"]))
         rows, next_cursor = newest_page(db, query, InterviewSession, limit, cursor)
         return {"items": [interview_summary(*row) for row in rows], "next_cursor": next_cursor}
@@ -211,7 +224,7 @@ def read_interview(request: Request, actor: Actor, interview_id: str):
 @router.post("/interviews/{interview_id}/answers", status_code=201, response_model=AnswerResult)
 def create_answer(request: Request, actor: Actor, key: CommandKey, interview_id: str, body: CreateAnswer):
     def create(db, interview):
-        require_question(interview)
+        require_question(db, interview)
         if interview.current_question_id != body.question_id:
             raise HTTPException(409, "INVALID_STATE")
         draft = db.scalar(select(Message.id).where(Message.session_id == interview.id,
@@ -229,7 +242,7 @@ def create_answer(request: Request, actor: Actor, key: CommandKey, interview_id:
 def update_answer(request: Request, actor: Actor, key: CommandKey, interview_id: str,
                   answer_id: str, body: UpdateAnswer):
     def change(db, interview):
-        answer = find_draft(db, interview, answer_id)
+        answer, _ = find_draft(db, interview, answer_id)
         answer.text = body.text
         return answer_result(db, interview, answer)
 
@@ -241,10 +254,10 @@ def update_answer(request: Request, actor: Actor, key: CommandKey, interview_id:
 def submit_answer(request: Request, actor: Actor, key: CommandKey, interview_id: str,
                   answer_id: str, body: VersionedRequest):
     def submit(db, interview):
-        answer = find_draft(db, interview, answer_id)
+        answer, current_intent = find_draft(db, interview, answer_id)
         answer.status = "queued"
         queue(interview, "extraction", answer_id=answer.id,
-              current_intent=interview.case_state["asked_intents"][-1])
+              current_intent=current_intent)
         return answer_result(db, interview, answer)
 
     return write_command(request, actor, key, body, submit, interview_id)
@@ -253,9 +266,14 @@ def submit_answer(request: Request, actor: Actor, key: CommandKey, interview_id:
 @router.post("/interviews/{interview_id}/skip", status_code=202, response_model=InterviewView)
 def skip_interview(request: Request, actor: Actor, key: CommandKey, interview_id: str, body: VersionedRequest):
     def skip(db, interview):
-        current = require_question(interview)
-        state = interview.case_state
-        interview.case_state = {**state, "declined_intents": list(dict.fromkeys([*state["declined_intents"], current]))}
+        current = require_question(db, interview)
+        try:
+            state = CaseState.model_validate(interview.case_state)
+        except ValidationError:
+            raise HTTPException(409, "INVALID_STATE") from None
+        if current not in state.declined_intents:
+            state.declined_intents.append(current)
+        interview.case_state = state.model_dump()
         append_message(db, interview, kind="control", text="Пропуск вопроса")
         intent = choose_intent(interview.case_state)
         if intent:

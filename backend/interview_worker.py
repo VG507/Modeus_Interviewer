@@ -66,7 +66,7 @@ def recent_history(db, interview, current_answer):
             record.get("assessment") is None and record.get("facts")
         ):
             continue
-        question = db.get(Message, reply.reply_to_question_id)
+        question = answer_question(db, interview, reply)
         turns.append({"question": (question.text or "")[:400] if question else "",
                       "answer": (reply.text or "")[:1000]})
         if len(turns) == 3:
@@ -141,8 +141,12 @@ def job_answer(db, interview, job):
 
 
 def answer_question(db, interview, answer):
-    question = db.get(Message, answer.reply_to_question_id) if answer and answer.reply_to_question_id else None
-    if question and question.session_id == interview.id and question.kind == "question":
+    return interview_question(db, interview, answer.reply_to_question_id) if answer else None
+
+
+def interview_question(db, interview, question_id):
+    question = db.get(Message, question_id) if question_id else None
+    if question and question.session_id == interview.id and question.kind == "question" and question.text:
         return question
     return None
 
@@ -160,7 +164,9 @@ def valid_job(db, interview, job):
             return True
     elif stage != "extraction":
         return False
-    return bool(job.get("current_intent") and answer_question(db, interview, job_answer(db, interview, job)))
+    answer = job_answer(db, interview, job)
+    intent = job.get("current_intent")
+    return bool(isinstance(intent, str) and intent and answer and answer.text and answer_question(db, interview, answer))
 
 
 def claim(sessions, timeout):
@@ -196,9 +202,13 @@ async def execute_stage(sessions, settings, interview_id, token):
         interview = get_claimed(db, interview_id, token)
         if interview is None:
             return
-        job, stage, state = interview.job, interview.processing_stage, interview.case_state
+        job, stage = job_payload(interview), interview.processing_stage
         if not valid_job(db, interview, job):
             raise InvalidJob("Incomplete processing job")
+        try:
+            state = CaseState.model_validate(interview.case_state).model_dump()
+        except ValidationError as exc:
+            raise InvalidJob("Invalid interview case state") from exc
         active_id = state.get("active_topic_id")
         topic = (db.get(Topic, active_id) if active_id else None) or db.get(Topic, interview.topic_id)
         if topic is None:

@@ -263,7 +263,7 @@ def run_collection(sessions, settings, profession_id, token, fixture=None):
                      run_id=None, lease_until=None, progress=None)).rowcount
             if not changed:
                 return {"status": "superseded"}
-            db.add(VacancySnapshot(id=token, profession_id=profession_id, collected_at=collected, stats=stats))
+            db.add(VacancySnapshot(id=token, profession_id=profession_id, collected_at=collected, stats=stats, cards=cards))
         return {"status": "ok", **stats}
     with sessions.begin() as db:
         db.execute(update(VacancyCollection).where(

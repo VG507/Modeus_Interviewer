@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, describe } from './api';
 import { DocumentationReview, DocumentationSettings } from './Documentation';
+import { ProfessionCollection } from './ProfessionCollection';
 
 const searchProviders = { github: 'GitHub Issues', trends: 'GitHub Trends' } as const;
-const providers = { ...searchProviders, docs: 'Официальная документация' } as const;
+const providers = { ...searchProviders, docs: 'Официальная документация', openalex: 'Научные статьи' } as const;
 type Provider = keyof typeof providers;
 const statuses: Record<string, string> = {
   new: 'Новый', review: 'На проверке', accepted: 'Допущен к интервью', observe: 'Наблюдаем',
@@ -18,7 +19,11 @@ type Profile = { id: string; title: string };
 type Item = {
   id: string; digest: string; title: string; url: string; provider: Provider; observed_at: string; status: string; reason: string | null;
   weekly_star_change?: number | null;
-  assessment: { resolution_url?: string; resolution_quote?: string; checked_at?: string } | null;
+  assessment: {
+    resolution_url?: string; resolution_quote?: string; checked_at?: string;
+    task?: string; quote?: string; method?: string; sample?: string; limitation?: string; conditions?: string[];
+    sections?: Record<string, string>;
+  } | null;
 };
 type ItemPage = { items: Item[]; next_offset: number | null };
 type ItemDetail = Item & {
@@ -29,6 +34,8 @@ type ItemDetail = Item & {
     description?: string; stars?: number; forks?: number; language?: string; topics?: string[];
     fragments?: Record<string, { url: string; text: string }>;
     kind?: string; reason?: string; supported?: boolean | null;
+    doi?: string; venue?: string; authors?: string[]; publication_date?: string; review_url?: string;
+    crossref_checked?: boolean; full_text_sha256?: string; published_licenses?: string[];
   };
 };
 
@@ -47,6 +54,31 @@ function fragmentLabel(key: string) {
 
 function Detail({ item }: { item: ItemDetail }) {
   const data = item.payload;
+  if (item.provider === 'openalex') {
+    const evidence = item.assessment;
+    const excerpts = [
+      { key: 'quote', label: 'Результат', text: evidence?.quote },
+      { key: 'method', label: 'Методика', text: evidence?.method },
+      { key: 'sample', label: 'Выборка', text: evidence?.sample },
+      { key: 'limitation', label: 'Ограничение', text: evidence?.limitation },
+    ];
+    return <div className="stack">
+      <p className="meta">{[data.venue, date(data.publication_date), data.doi && `DOI ${data.doi}`,
+        evidence?.checked_at && `Проверено ${date(evidence.checked_at)}`].filter(Boolean).join(' · ')}</p>
+      {!!data.authors?.length && <p className="meta">{data.authors.join(', ')}</p>}
+      {item.reason && <p>{item.reason}</p>}
+      {data.review_url && <p><a href={data.review_url} target="_blank" rel="noreferrer">Основание проверки рецензирования</a></p>}
+      {data.crossref_checked && <p className="meta">На дату проверки Crossref не вернул уведомлений об обновлении.</p>}
+      {data.full_text_sha256 && <p className="meta">Источник выдержек — полный текст TEI XML.
+        {data.published_licenses?.length ? ` Лицензия опубликованной версии: ${data.published_licenses.join(', ')}.` : ''}</p>}
+      {evidence?.task && <p><strong>Рабочая задача</strong> {evidence.task}</p>}
+      {!!evidence?.conditions?.length && <p><strong>Условия применимости</strong> {evidence.conditions.join(' · ')}</p>}
+      {excerpts.filter(entry => entry.text).map(({ key, label, text }) => <details key={key} open={key === 'method'}>
+        <summary>{label}{evidence?.sections?.[key] && ` · ${evidence.sections[key]}`}</summary>
+        <p className="discovery-fragment">{text}</p>
+      </details>)}
+    </div>;
+  }
   return <div className="stack">
     <p className="meta">
       {[data.repo && `${data.repo} #${data.number}`, date(data.closed_at) && `Закрыто ${date(data.closed_at)}`,
@@ -92,6 +124,7 @@ export function Discovery({ onSessionExpired }: { onSessionExpired: () => void }
   const [collectionError, setCollectionError] = useState('');
   const [collecting, setCollecting] = useState(false);
   const collectionRequest = useRef<AbortController | null>(null);
+  const refreshMaterials = useCallback(() => setReload(value => value + 1), []);
 
   useEffect(() => () => collectionRequest.current?.abort(), []);
 
@@ -195,6 +228,8 @@ export function Discovery({ onSessionExpired }: { onSessionExpired: () => void }
       </select></label>
       <button className="secondary" onClick={() => { showPage(0); setReload(value => value + 1); }}>Обновить</button>
     </div>
+    {profession && <ProfessionCollection key={profession} profession={profession}
+      onSessionExpired={onSessionExpired} onCompleted={refreshMaterials}/>}
     <form className="panel" onSubmit={collectForProfession}>
       <h2>Сбор для выбранной профессии</h2>
       <fieldset className="vacancy-filters" disabled={collecting || !profession}>

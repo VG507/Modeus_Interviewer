@@ -100,6 +100,8 @@ def collect_documentation(sessions, profession=None, *, due=None):
                 count, changes = finish_watch(sessions, id_, token, sections, missing)
                 result["collected"] += count
                 result["changed"] += changes
+                if missing and not sections:
+                    result["errors"][id_] = missing
             except CollectionError as exc:
                 error = str(exc)
             except httpx.HTTPStatusError as exc:

@@ -13,7 +13,9 @@ from backend.discovery import candidate_output, collect, item_entry, list_candid
 from backend.discovery_fetch import CollectionError
 from backend.documentation import collect_documentation
 from backend.github_evidence import process_pending
+from backend.hn import HackerNewsUnavailable, collect_hn
 from backend.llm import check_llm
+from backend.openalex import collect_research
 from backend.security import hash_password
 from backend.settings import Settings
 from backend.source_context import import_excerpts
@@ -26,6 +28,11 @@ DISCOVERY_COMMANDS = {"fetch-github": "github", "fetch-trends": "trends"}
 def discovery_command(args, settings):
     engine, sessions = database(settings.database_url)
     try:
+        if args.command == "fetch-openalex":
+            return collect_research(sessions, settings, args.profession_id, overrides=args.query or ())
+        if args.command == "fetch-hn":
+            return collect_hn(sessions, args.profession_id, technologies=args.technology, feed_limit=args.feed_limit,
+                              limit=args.limit, comment_limit=args.comment_limit)
         if args.command == "fetch-docs":
             with sessions() as db:
                 if args.profession_id and db.get(VacancyCollection, args.profession_id) is None:
@@ -74,6 +81,15 @@ def main():
     sources.add_argument("file", type=Path)
     docs = sub.add_parser("fetch-docs", help="Refresh watched official documentation and release notes")
     docs.add_argument("profession_id", nargs="?")
+    research = sub.add_parser("fetch-openalex", help="Collect and verify scholarly articles for one profession")
+    research.add_argument("profession_id")
+    research.add_argument("--query", action="append", help="Search by a practical task (up to four queries)")
+    hn = sub.add_parser("fetch-hn", help="Collect IT stories and comments from Hacker News")
+    hn.add_argument("profession_id", nargs="?")
+    hn.add_argument("--technology", action="append", default=[], help="Add a technology to the selected profile")
+    hn.add_argument("--feed-limit", type=number_between(1, 150), default=50, help="Maximum IDs from each feed")
+    hn.add_argument("--limit", type=number_between(1, 30), default=10, help="Maximum stored stories")
+    hn.add_argument("--comment-limit", type=number_between(1, 80), default=40, help="Maximum comment lookups per story")
     for name, option in (("fetch-github", "--repo"), ("fetch-trends", "--topic")):
         fetch_parser = sub.add_parser(name)
         fetch_parser.add_argument("profession_id")
@@ -91,10 +107,15 @@ def main():
     args = parser.parse_args()
     settings = Settings()
     if args.command in DISCOVERY_COMMANDS or args.command in {
-        "fetch-docs", "list-discovery",
+        "fetch-docs", "fetch-hn", "fetch-openalex", "list-discovery",
     }:
         try:
-            print(json.dumps(discovery_command(args, settings), ensure_ascii=True, default=str))
+            result = discovery_command(args, settings)
+            print(json.dumps(result, ensure_ascii=True, default=str))
+            if args.command == "fetch-openalex" and result["status"] in {"failed", "skipped"}:
+                raise SystemExit(1)
+        except HackerNewsUnavailable as exc:
+            parser.exit(1, f"fetch-hn: {exc}\n")
         except (CollectionError, OSError) as exc:
             parser.error(str(exc))
         except (httpx.HTTPError, ValidationError, KeyError, TypeError, ValueError, RuntimeError) as exc:

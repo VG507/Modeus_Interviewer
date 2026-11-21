@@ -6,11 +6,13 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field, StrictBool, StringConstraints, model_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from backend.db import CardEvent, InterviewSession, KnowledgeCard, Topic, now
+from backend.catalog_topics import catalog_topic_columns, profession_for_card
+from backend.db import CardEvent, KnowledgeCard, now
 from backend.interview_api import Actor, CommandKey, PageSize, utc, versioned_command
-from backend.interview_schemas import FactField, Identifier, OPEN_TOPIC_ID, ShortText, VersionedRequest
+from backend.interview_schemas import FactField, Identifier, ShortText, VersionedRequest
+from backend.pagination import newest_page
 
 router = APIRouter(prefix="/api/v1")
 SECTIONS = ("task", "context", "actions", "decisions", "verification", "errors", "limitations")
@@ -26,18 +28,18 @@ class FactEdit(BaseModel):
 
 class CaseEdit(BaseModel):
     title: ShortText
-    task: list[FactEdit] = Field(default_factory=list, max_length=300)
-    context: list[FactEdit] = Field(default_factory=list, max_length=300)
-    actions: list[FactEdit] = Field(default_factory=list, max_length=300)
-    decisions: list[FactEdit] = Field(default_factory=list, max_length=300)
-    verification: list[FactEdit] = Field(default_factory=list, max_length=300)
-    errors: list[FactEdit] = Field(default_factory=list, max_length=300)
-    limitations: list[FactEdit] = Field(default_factory=list, max_length=300)
+    task: list[FactEdit] = Field(default_factory=list, max_length=50)
+    context: list[FactEdit] = Field(default_factory=list, max_length=50)
+    actions: list[FactEdit] = Field(default_factory=list, max_length=50)
+    decisions: list[FactEdit] = Field(default_factory=list, max_length=50)
+    verification: list[FactEdit] = Field(default_factory=list, max_length=50)
+    errors: list[FactEdit] = Field(default_factory=list, max_length=50)
+    limitations: list[FactEdit] = Field(default_factory=list, max_length=50)
     unknown_fields: list[FactField] = Field(default_factory=list, max_length=7)
 
 
 class ContentEdit(CaseEdit):
-    cases: list[CaseEdit] | None = Field(default=None, max_length=100)
+    cases: list[CaseEdit] | None = Field(default=None, max_length=20)
 
 
 class EditCard(VersionedRequest):
@@ -164,13 +166,6 @@ def card_view(card):
     })
 
 
-def page(db, query, limit, cursor):
-    if cursor:
-        query = query.where(KnowledgeCard.id < cursor)
-    rows = list(db.scalars(query.order_by(KnowledgeCard.id.desc()).limit(limit + 1)))
-    return rows[:limit], rows[limit - 1].id if len(rows) > limit else None
-
-
 @router.get("/cards", response_model=CardPage[CardView])
 def list_cards(request: Request, response: Response, actor: Actor, limit: PageSize = 20, cursor: Identifier | None = None,
                scope: Literal["own", "review", "published"] = "own"):
@@ -183,8 +178,8 @@ def list_cards(request: Request, response: Response, actor: Actor, limit: PageSi
         status = "in_review" if scope == "review" else "published"
         query = query.where(KnowledgeCard.first_submitted_at.is_not(None), KnowledgeCard.publication_status == status)
     with request.app.state.sessions() as db:
-        rows, next_cursor = page(db, query, limit, cursor)
-        return {"items": [card_view(card) for card in rows], "next_cursor": next_cursor}
+        rows, next_cursor = newest_page(db, query, KnowledgeCard, limit, cursor)
+        return {"items": [card_view(card) for (card,) in rows], "next_cursor": next_cursor}
 
 
 @router.get("/cards/{card_id}", response_model=CardDetail)
@@ -213,6 +208,8 @@ def write_card(request, actor, key, card_id, body, access, apply):
         stamp = now()
         event_id = str(uuid4())
         action, details = apply(card, stamp, event_id)
+        if action == "review" and card.publication_status == "published":
+            card.catalog_profession_id = profession_for_card(db, card.id)
         card.updated_at = stamp
         db.add(CardEvent(id=event_id, card_id=card.id, actor_id=actor["id"], action=action,
                          version=card.version, content_version=card.content_version, details=details, created_at=stamp))
@@ -338,13 +335,11 @@ def published_cards():
     )
 
 
-def public_summary(db, card):
-    session = db.get(InterviewSession, card.session_id)
-    topic = db.get(Topic, session.topic_id)
+def public_summary(card, topic_title, topic_profession):
     title = card.content["title"]
     return PublicSummary(
-        id=card.id, title=title, profession_id=topic.profession_id,
-        topic_title=title if topic.id == OPEN_TOPIC_ID else topic.title,
+        id=card.id, title=title, profession_id=card.catalog_profession_id or topic_profession or "unknown",
+        topic_title=topic_title or title,
         reviewed_at=card.review["at"], author_name=card.author_name if card.show_author else None,
     )
 
@@ -362,18 +357,43 @@ def public_content(content):
 
 
 @router.get("/catalog", response_model=CardPage[PublicSummary])
-def catalog(request: Request, response: Response, limit: PageSize = 20, cursor: Identifier | None = None):
+def catalog(request: Request, response: Response, limit: PageSize = 20, cursor: Identifier | None = None,
+            topic_id: Identifier | None = None, profession_id: Identifier | None = None,
+            topic_title: ShortText | None = None):
     response.headers["Cache-Control"] = "no-store"
     with request.app.state.sessions() as db:
-        rows, next_cursor = page(db, published_cards(), limit, cursor)
-        return {"items": [public_summary(db, card) for card in rows], "next_cursor": next_cursor}
+        query = catalog_topic_columns(published_cards())
+        if topic_id:
+            query = query.where(query.selected_columns.topic_id == topic_id)
+        if topic_title:
+            query = query.where(func.coalesce(
+                query.selected_columns.topic_title, KnowledgeCard.content["title"].as_string(),
+            ) == topic_title)
+        if profession_id:
+            query = query.where(func.coalesce(
+                KnowledgeCard.catalog_profession_id, query.selected_columns.topic_profession, "unknown",
+            ) == profession_id)
+        rows, next_cursor = newest_page(db, query, KnowledgeCard, limit, cursor)
+        return {"items": [public_summary(card, title, profession) for card, _, title, profession in rows],
+                "next_cursor": next_cursor}
+
+
+@router.get("/catalog/topics")
+def catalog_topics(request: Request, response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    query = catalog_topic_columns(published_cards())
+    title = func.coalesce(query.selected_columns.topic_title, KnowledgeCard.content["title"].as_string())
+    with request.app.state.sessions() as db:
+        return {"items": list(db.scalars(query.with_only_columns(title).distinct().order_by(title)))}
 
 
 @router.get("/catalog/{card_id}", response_model=PublicCard)
 def catalog_card(request: Request, response: Response, card_id: Identifier):
     response.headers["Cache-Control"] = "no-store"
     with request.app.state.sessions() as db:
-        card = db.scalar(published_cards().where(KnowledgeCard.id == card_id))
-        if card is None:
+        row = db.execute(catalog_topic_columns(published_cards()).where(KnowledgeCard.id == card_id)).first()
+        if row is None:
             raise HTTPException(404, "CARD_NOT_FOUND", headers={"Cache-Control": "no-store"})
-        return PublicCard(**public_summary(db, card).model_dump(), content=public_content(card.content), text=card.text)
+        card, _, title, profession = row
+        return PublicCard(**public_summary(card, title, profession).model_dump(),
+                          content=public_content(card.content), text=card.text)

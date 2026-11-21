@@ -164,18 +164,20 @@ export function InterviewScreen({ id, onSessionExpired }: { id: string; onSessio
     <section className="panel">
       <h2>Диалог</h2>
       <ol className="transcript" aria-label="История интервью">
-        {session.messages.filter(message => message.status !== 'draft').map(message =>
-          <li key={message.id} className={`turn turn-${message.kind}`}>
+        {session.messages.filter(message => message.status !== 'draft').map(message => {
+          const source = message.source_quote ?? message.vacancy_quote;
+          return <li key={message.id} className={`turn turn-${message.kind}`}>
             {message.kind !== 'control' && <strong>{message.kind === 'question' ? 'Modeus' : 'Вы'}</strong>}
             <p>{message.text}</p>
-            {message.vacancy_quote && <details className="question-source">
+            {source && <details className="question-source">
               <summary>Источник уточнения</summary>
-              <blockquote>{message.vacancy_quote.quote}</blockquote>
-              <a href={message.vacancy_quote.url} target="_blank" rel="noreferrer">{message.vacancy_quote.title}</a>
+              <blockquote>{source.quote}</blockquote>
+              <a href={source.url} target="_blank" rel="noreferrer">{source.title}</a>
             </details>}
             {message.assessment === 'unclear' && <small>Нужно уточнение</small>}
             {message.assessment === 'unrelated' && <small>Связь с рабочим случаем неясна</small>}
-          </li>)}
+          </li>;
+        })}
       </ol>
       {processing && <p className="status" role="status">
         {session.processing_stage ? stageLabels[session.processing_stage] : 'Обрабатываем интервью'}…

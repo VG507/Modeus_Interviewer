@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import re
 import secrets
 
 
@@ -10,7 +11,10 @@ def hash_password(password: str) -> str:
 
 
 def check_password(password: str, stored: str) -> bool:
-    _, salt, expected = stored.split("$")
+    parsed = re.fullmatch(r"scrypt\$([0-9a-f]{32})\$([0-9a-f]{128})", stored)
+    if parsed is None:
+        return False
+    salt, expected = parsed.groups()
     digest = hashlib.scrypt(password.encode(), salt=salt.encode(), n=16384, r=8, p=1).hex()
     return hmac.compare_digest(digest, expected)
 

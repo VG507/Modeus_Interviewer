@@ -47,29 +47,37 @@ def years_fit(experience, band):
     return lower <= years <= upper
 
 
-def sources_for_question(db, intake, state, intent):
+def profession_for_question(db, intake, state, intent):
     if intent not in QUESTION_INTENTS or (intent == "verification" and any(
         fact["field"] == "error" for fact in state["facts"]
     )):
-        return []
+        return None
     role = intake.get("role", "")
     profiles = [row for row in db.scalars(select(VacancyCollection).where(
         VacancyCollection.approved.is_(True),
     ).options(load_only(VacancyCollection.profession_id, VacancyCollection.title, VacancyCollection.aliases)))
                 if profile_matches(row.profession_id, role, row)]
     profiles = [row for row in profiles if row.aliases is not None] or profiles
-    if len(profiles) != 1 or not any(fact["field"] == "task" for fact in state["facts"]):
+    if len(profiles) == 1 and any(fact["field"] == "task" for fact in state["facts"]):
+        return profiles[0].profession_id
+    return None
+
+
+def sources_for_question(db, intake, state, intent, *, profession_id=None):
+    profession_id = profession_id or profession_for_question(db, intake, state, intent)
+    if profession_id is None:
         return []
-    collection = db.get(VacancyCollection, profiles[0].profession_id)
+    collection = db.get(VacancyCollection, profession_id)
     if not collection or not collection.updated_at or now() - collection.updated_at > FRESH_FOR:
         return []
 
     task_text = "\n".join(fact["text"][:500] for fact in state["facts"] if fact["field"] == "task")
     case_text = task_text + "\n" + "\n".join(fact["text"][:500] for fact in state["facts"][-14:] if fact["field"] != "task")
+    normalized_case = " ".join(case_text.casefold().split())
     task_words, case_words = keywords(task_text), keywords(case_text)
     signals = task_signals(case_text)
     case_skills = {skill for skill, _ in skill_hits(case_text)}
-    level = level_of(role)
+    level = level_of(intake.get("role", ""))
     matches = []
     for card in collection.cards:
         if level and card["level"] and level != card["level"]:
@@ -83,6 +91,8 @@ def sources_for_question(db, intake, state, intent):
         for index, candidate in enumerate(card["tasks"]):
             citation = task_citations.get(f"tasks.{index}")
             if not citation or citation["quote"] != candidate:
+                continue
+            if " ".join(candidate.casefold().split()) in normalized_case:
                 continue
             words = keywords(candidate)
             candidate_score = (len(signals & task_signals(candidate)), len(task_words & words), len(case_words & words))

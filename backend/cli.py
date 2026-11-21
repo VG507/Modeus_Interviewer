@@ -4,13 +4,58 @@ import getpass
 import json
 from pathlib import Path
 
+import httpx
+from pydantic import ValidationError
 from sqlalchemy import delete, select
 
 from backend.db import LoginSession, User, VacancyCollection, database
+from backend.discovery import candidate_output, collect, item_entry, list_candidates
+from backend.discovery_fetch import CollectionError
+from backend.documentation import collect_documentation
+from backend.github_evidence import process_pending
 from backend.llm import check_llm
 from backend.security import hash_password
 from backend.settings import Settings
+from backend.source_context import import_excerpts
 from backend.vacancy_import import claim_collection, run_collection
+
+
+DISCOVERY_COMMANDS = {"fetch-github": "github", "fetch-trends": "trends"}
+
+
+def discovery_command(args, settings):
+    engine, sessions = database(settings.database_url)
+    try:
+        if args.command == "fetch-docs":
+            with sessions() as db:
+                if args.profession_id and db.get(VacancyCollection, args.profession_id) is None:
+                    raise CollectionError("Unknown profession")
+            return collect_documentation(sessions, args.profession_id)
+        if args.command in DISCOVERY_COMMANDS:
+            provider = DISCOVERY_COMMANDS[args.command]
+            result = collect(sessions, settings, provider, args.profession_id, args.values, args.pages,
+                             args.limit, getattr(args, "min_stars", 100), getattr(args, "label", None))
+            if provider == "github":
+                asyncio.run(process_pending(sessions, settings, profession=args.profession_id, limit=args.limit))
+            return result
+        with sessions() as db:
+            if not args.id:
+                return list_candidates(db, args.profession_id, args.limit)
+            item, candidate = item_entry(db, args.profession_id, args.id)
+            if item is None or candidate is None:
+                raise CollectionError("Unknown discovery candidate")
+            return candidate_output(db, item, candidate, include_text=True)
+    finally:
+        engine.dispose()
+
+
+def number_between(minimum, maximum):
+    def parsed(value):
+        number = int(value)
+        if not minimum <= number <= maximum:
+            raise argparse.ArgumentTypeError(f"expected a number between {minimum} and {maximum}")
+        return number
+    return parsed
 
 
 def main():
@@ -25,8 +70,36 @@ def main():
     collect = sub.add_parser("import-vacancies", help="Refresh HH vacancies for one profile")
     collect.add_argument("profession_id")
     collect.add_argument("--file", type=Path, help="Import a JSON array of saved detailed HH responses")
+    sources = sub.add_parser("import-sources", help="Import reviewed source excerpts from a JSON file")
+    sources.add_argument("file", type=Path)
+    docs = sub.add_parser("fetch-docs", help="Refresh watched official documentation and release notes")
+    docs.add_argument("profession_id", nargs="?")
+    for name, option in (("fetch-github", "--repo"), ("fetch-trends", "--topic")):
+        fetch_parser = sub.add_parser(name)
+        fetch_parser.add_argument("profession_id")
+        fetch_parser.add_argument(option, dest="values", action="append")
+        fetch_parser.add_argument("--pages", type=number_between(1, 10), default=2)
+        fetch_parser.add_argument("--limit", type=number_between(1, 100), default=20)
+        if name == "fetch-github":
+            fetch_parser.add_argument("--label", action="append")
+        if name == "fetch-trends":
+            fetch_parser.add_argument("--min-stars", type=number_between(1, 1_000_000), default=100)
+    listing = sub.add_parser("list-discovery")
+    listing.add_argument("profession_id")
+    listing.add_argument("--id")
+    listing.add_argument("--limit", type=number_between(1, 100), default=30)
     args = parser.parse_args()
     settings = Settings()
+    if args.command in DISCOVERY_COMMANDS or args.command in {
+        "fetch-docs", "list-discovery",
+    }:
+        try:
+            print(json.dumps(discovery_command(args, settings), ensure_ascii=True, default=str))
+        except (CollectionError, OSError) as exc:
+            parser.error(str(exc))
+        except (httpx.HTTPError, ValidationError, KeyError, TypeError, ValueError, RuntimeError) as exc:
+            parser.error(f"Discovery failed: {type(exc).__name__}")
+        return
     if args.command == "check-llm":
         try:
             print(json.dumps(asyncio.run(check_llm(settings))))
@@ -34,6 +107,17 @@ def main():
             # No exception body from HTTP clients: URLs may include credentials.
             print(str(exc) if type(exc) is RuntimeError else type(exc).__name__)
             raise SystemExit(1) from None
+        return
+    if args.command == "import-sources":
+        engine, sessions = database(settings.database_url)
+        try:
+            with sessions.begin() as db:
+                count = import_excerpts(db, json.loads(args.file.read_text(encoding="utf-8-sig")))
+        except (OSError, ValueError) as exc:
+            parser.error(str(exc))
+        finally:
+            engine.dispose()
+        print(json.dumps({"imported": count}))
         return
     if args.command == "import-vacancies":
         engine, sessions = database(settings.database_url)
@@ -58,7 +142,8 @@ def main():
         parser.error("Invalid email")
     local_setup = (
         settings.database_url.startswith("sqlite:///")
-        and settings.app_origin in {"http://localhost:5173", "http://127.0.0.1:5173"}
+        and bool(settings.app_origins)
+        and settings.app_origins <= {"http://localhost:5173", "http://127.0.0.1:5173"}
         and not settings.cookie_secure
     )
     minimum_length = 4 if local_setup else 12

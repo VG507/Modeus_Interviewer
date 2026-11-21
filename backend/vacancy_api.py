@@ -1,18 +1,19 @@
 """Editor access to HH collections and manual refresh."""
 
 from collections import Counter
+from datetime import timedelta
 from typing import Annotated, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel, Field, StringConstraints, field_validator
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import load_only
 
 from backend.db import InterviewSession, VacancyCollection, now
 from backend.interview_api import Actor, utc
-from backend.vacancy_import import FRESH_FOR, RUN_LEASE, claim_collection, configured, run_collection
+from backend.vacancy_import import FRESH_FOR, claim_collection, collection_available, configured, run_collection
 from backend.vacancy_parser import profile_matches, role_key
 
 router = APIRouter(prefix="/api/v1/vacancies")
@@ -43,7 +44,7 @@ def require_editor(actor):
 
 def require_editor_write(request, actor):
     require_editor(actor)
-    if request.headers.get("origin") != request.app.state.app_origin:
+    if request.headers.get("origin") not in request.app.state.app_origins:
         raise HTTPException(403, "ORIGIN_REJECTED")
 
 
@@ -53,7 +54,7 @@ def check_profile(db, profession_id):
 
 
 def collection_status(collection, current):
-    expired = bool(collection.run_id and collection.started_at and current - collection.started_at >= RUN_LEASE)
+    expired = bool(collection.run_id and (collection.lease_until is None or collection.lease_until <= current))
     running = bool(collection.run_id and not expired)
     return {
         "running": running,
@@ -71,7 +72,8 @@ def overview(request: Request, actor: Actor):
     with request.app.state.sessions() as db:
         rows = db.scalars(select(VacancyCollection).options(load_only(
             VacancyCollection.profession_id, VacancyCollection.updated_at, VacancyCollection.started_at,
-            VacancyCollection.run_id, VacancyCollection.error, VacancyCollection.progress, VacancyCollection.stats,
+            VacancyCollection.run_id, VacancyCollection.lease_until, VacancyCollection.error,
+            VacancyCollection.progress, VacancyCollection.stats,
             VacancyCollection.title, VacancyCollection.search_query, VacancyCollection.aliases,
             VacancyCollection.approved, VacancyCollection.config_version,
         )).order_by(VacancyCollection.profession_id))
@@ -102,12 +104,18 @@ def candidates(request: Request, actor: Actor):
         ))))
         counts = Counter()
         labels = {}
-        for role in db.scalars(select(InterviewSession.context["role"].as_string()).where(InterviewSession.origin == "human")):
+        role_value = InterviewSession.context["role"].as_string()
+        occurrences = func.count()
+        roles = db.execute(select(role_value, occurrences).where(
+            InterviewSession.origin == "human", InterviewSession.created_at >= now() - timedelta(days=90),
+            role_value.is_not(None),
+        ).group_by(role_value).order_by(occurrences.desc(), role_value).limit(1000))
+        for role, count in roles:
             if not isinstance(role, str) or not (key := role_key(role)) or len(role) > 120:
                 continue
             if any(profile_matches(item.profession_id, role, item) for item in profiles):
                 continue
-            counts[key] += 1
+            counts[key] += count
             labels.setdefault(key, role.strip())
     return {"candidates": [{"role": labels[key], "interviews": count} for key, count in counts.most_common(50)]}
 
@@ -136,10 +144,11 @@ def edit_profile(profession_id: str, body: ProfileInput, request: Request, actor
     try:
         with request.app.state.sessions.begin() as db:
             check_profile(db, profession_id)
-            changed = db.execute(update(VacancyCollection).where(VacancyCollection.profession_id == profession_id, or_(
-                VacancyCollection.run_id.is_(None), VacancyCollection.started_at <= now() - RUN_LEASE,
-            )).values(**body.model_dump(), title_key=key, approved=False,
-                      config_version=VacancyCollection.config_version + 1, run_id=None, progress=None, error=None)).rowcount
+            changed = db.execute(update(VacancyCollection).where(
+                VacancyCollection.profession_id == profession_id, collection_available(now()),
+            ).values(**body.model_dump(), title_key=key, approved=False,
+                      config_version=VacancyCollection.config_version + 1, run_id=None, lease_until=None,
+                      progress=None, error=None)).rowcount
             if not changed:
                 raise HTTPException(409, "HH_ALREADY_RUNNING")
     except IntegrityError as exc:
@@ -153,7 +162,8 @@ def review_profile(profession_id: str, body: ProfileReview, request: Request, ac
     with request.app.state.sessions.begin() as db:
         row = db.get(VacancyCollection, profession_id, options=[load_only(
             VacancyCollection.stats, VacancyCollection.config_version, VacancyCollection.updated_at,
-            VacancyCollection.started_at, VacancyCollection.run_id, VacancyCollection.error, VacancyCollection.progress,
+            VacancyCollection.started_at, VacancyCollection.run_id, VacancyCollection.lease_until,
+            VacancyCollection.error, VacancyCollection.progress,
         )])
         if row is None:
             raise HTTPException(404, "PROFILE_NOT_FOUND")
@@ -176,7 +186,7 @@ def vacancies(request: Request, actor: Actor, profession_id: str = "python_backe
     with request.app.state.sessions() as db:
         collection = db.get(VacancyCollection, profession_id, options=[load_only(
             VacancyCollection.cards, VacancyCollection.stats, VacancyCollection.updated_at, VacancyCollection.started_at,
-            VacancyCollection.run_id, VacancyCollection.error, VacancyCollection.progress,
+            VacancyCollection.run_id, VacancyCollection.lease_until, VacancyCollection.error, VacancyCollection.progress,
         )])
         if collection is None:
             raise HTTPException(404, "PROFILE_NOT_FOUND")

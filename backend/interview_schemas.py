@@ -126,7 +126,7 @@ class InterviewView(Schema):
     updated_at: datetime
 
 
-class VacancyQuote(Schema):
+class SourceQuote(Schema):
     title: str
     url: str
     quote: str
@@ -143,7 +143,8 @@ class MessageView(Schema):
     created_at: datetime
     updated_at: datetime
     assessment: AnswerAssessment | None = None
-    vacancy_quote: VacancyQuote | None = None
+    vacancy_quote: SourceQuote | None = None
+    source_quote: SourceQuote | None = None
 
 
 class InterviewDetail(InterviewView):

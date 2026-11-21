@@ -1,12 +1,18 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, event, false
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, create_engine, event, false
+from sqlalchemy.dialects.postgresql import insert as postgres_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 
 def now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def insert_for(db, model):
+    return (sqlite_insert if db.get_bind().dialect.name == "sqlite" else postgres_insert)(model)
 
 
 class Base(DeclarativeBase):
@@ -28,8 +34,22 @@ class LoginSession(Base):
     __tablename__ = "login_sessions"
     token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
-    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class LoginWindow(Base):
+    __tablename__ = "login_windows"
+    client: Mapped[str] = mapped_column(String(64), primary_key=True)
+    window: Mapped[int] = mapped_column(Integer, index=True)
+    attempts: Mapped[int] = mapped_column(Integer)
+
+
+class DiscoveryWindow(Base):
+    __tablename__ = "discovery_windows"
+    provider: Mapped[str] = mapped_column(String(16), primary_key=True)
+    token: Mapped[str | None] = mapped_column(String(36))
+    available_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class Topic(Base):
@@ -49,8 +69,81 @@ class Source(Base):
     text: Mapped[str] = mapped_column(Text)
 
 
+class SourceExcerpt(Base):
+    __tablename__ = "source_excerpts"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    source_id: Mapped[str] = mapped_column(ForeignKey("sources.id"))
+    profession_id: Mapped[str] = mapped_column(ForeignKey("vacancy_collections.profession_id"), index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    kind: Mapped[str] = mapped_column(String(24))
+    purpose: Mapped[str] = mapped_column(String(24))
+    task: Mapped[str] = mapped_column(String(300))
+    quote: Mapped[str] = mapped_column(String(500))
+    detail: Mapped[str] = mapped_column(String(200))
+    technology: Mapped[str | None] = mapped_column(String(80))
+    version: Mapped[str | None] = mapped_column(String(30))
+    conditions: Mapped[list] = mapped_column(JSON)
+    method: Mapped[str | None] = mapped_column(String(500))
+
+
+class DiscoveryItem(Base):
+    __tablename__ = "discovery_items"
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(16))
+    title: Mapped[str] = mapped_column(Text)
+    url: Mapped[str] = mapped_column(Text)
+    digest: Mapped[str] = mapped_column(String(64))
+    observed_at: Mapped[datetime] = mapped_column(DateTime)
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
+class DiscoveryCandidate(Base):
+    __tablename__ = "discovery_candidates"
+    item_id: Mapped[str] = mapped_column(ForeignKey("discovery_items.id"), primary_key=True)
+    profession_id: Mapped[str] = mapped_column(ForeignKey("vacancy_collections.profession_id"), primary_key=True, index=True)
+    status: Mapped[str] = mapped_column(String(16))
+    reviewed_digest: Mapped[str | None] = mapped_column(String(64))
+    assessment: Mapped[dict | None] = mapped_column(JSON)
+    reason: Mapped[str | None] = mapped_column(Text)
+    excerpt_id: Mapped[str | None] = mapped_column(ForeignKey("source_excerpts.id"), unique=True)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime)
+    retry_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class DocumentationWatch(Base):
+    __tablename__ = "documentation_watches"
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime)
+    attempted_at: Mapped[datetime | None] = mapped_column(DateTime)
+    error: Mapped[str | None] = mapped_column(Text)
+    token: Mapped[str | None] = mapped_column(String(36))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class DocumentationSubscription(Base):
+    __tablename__ = "documentation_subscriptions"
+    watch_id: Mapped[str] = mapped_column(ForeignKey("documentation_watches.id"), primary_key=True)
+    profession_id: Mapped[str] = mapped_column(ForeignKey("vacancy_collections.profession_id"), primary_key=True)
+
+
+class DocumentationRevision(Base):
+    __tablename__ = "documentation_revisions"
+    item_id: Mapped[str] = mapped_column(ForeignKey("discovery_items.id"), primary_key=True)
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
+class RepositoryObservation(Base):
+    __tablename__ = "repository_observations"
+    item_id: Mapped[str] = mapped_column(ForeignKey("discovery_items.id"), primary_key=True)
+    day: Mapped[str] = mapped_column(String(10), primary_key=True)
+    observed_at: Mapped[datetime] = mapped_column(DateTime)
+    stars: Mapped[int] = mapped_column(Integer)
+
+
 class InterviewSession(Base):
     __tablename__ = "interview_sessions"
+    __table_args__ = (Index("ix_interview_sessions_origin_created_at", "origin", "created_at"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     topic_id: Mapped[str] = mapped_column(ForeignKey("topics.id"))
@@ -92,6 +185,7 @@ class CommandReceipt(Base):
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
     body_digest: Mapped[str] = mapped_column(String(64))
     result: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now, index=True)
 
 
 class KnowledgeCard(Base):
@@ -112,6 +206,7 @@ class KnowledgeCard(Base):
     first_submitted_at: Mapped[datetime | None] = mapped_column(DateTime)
     consent: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
     review: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
+    catalog_profession_id: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
     __mapper_args__ = {"version_id_col": version, "version_id_generator": False}
@@ -146,6 +241,7 @@ class VacancyCollection(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime)
     started_at: Mapped[datetime | None] = mapped_column(DateTime)
     run_id: Mapped[str | None] = mapped_column(String(36))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime)
     error: Mapped[str | None] = mapped_column(String(64))
 
 

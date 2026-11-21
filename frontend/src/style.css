@@ -26,6 +26,10 @@ p { margin: 0 0 12px; }
 .workspace { display: grid; grid-template-columns: 1.12fr 1fr; gap: 20px; align-items: start; }
 .workspace-error { grid-column: 1 / -1; }
 .vacancy-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+.discovery-fragment { white-space: pre-wrap; overflow-wrap: anywhere; }
+.documentation-option { display: flex; align-items: center; gap: 8px; }
+.documentation-option input { width: auto; margin: 0; }
+.documentation-option + .meta { margin: 4px 0 8px; }
 .market-muted { color: #526763; font-weight: 400; }
 .market-profiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
 .market-profile { display: grid; align-content: start; gap: 4px; width: 100%; height: 100%; text-align: left; }

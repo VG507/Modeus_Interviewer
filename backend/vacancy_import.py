@@ -19,7 +19,7 @@ from backend.vacancy_parser import PROFILES, identity, parse_vacancy
 logger = logging.getLogger(__name__)
 REQUEST_INTERVAL = timedelta(milliseconds=334)
 RUN_TIMEOUT = timedelta(hours=1)
-RUN_LEASE = RUN_TIMEOUT + timedelta(minutes=2)
+RUN_LEASE = timedelta(minutes=5)
 FRESH_FOR = timedelta(days=14)
 SAMPLE_SIZE = 50
 PERIOD_DAYS = 30
@@ -154,9 +154,14 @@ class CollectionProgress:
         if not changed_stage and monotonic() - self.last_report_at < 1:
             return
         with self.sessions.begin() as db:
-            db.execute(update(VacancyCollection).where(
+            stamp = now()
+            changed = db.execute(update(VacancyCollection).where(
                 VacancyCollection.profession_id == self.profession_id, VacancyCollection.run_id == self.token,
-            ).values(progress={**self.state, "reported_at": now().replace(tzinfo=timezone.utc).isoformat()}))
+                VacancyCollection.lease_until > stamp,
+            ).values(lease_until=stamp + RUN_LEASE,
+                     progress={**self.state, "reported_at": stamp.replace(tzinfo=timezone.utc).isoformat()})).rowcount
+            if not changed:
+                raise ImportFailure("HH_TIMEOUT")
         self.last_report_at = monotonic()
 
 
@@ -203,17 +208,23 @@ def working_areas(settings):
     return [part.strip() for part in settings.hh_areas.split(",") if part.strip()]
 
 
+def collection_available(current):
+    return or_(VacancyCollection.run_id.is_(None), VacancyCollection.lease_until.is_(None),
+               VacancyCollection.lease_until <= current)
+
+
 def claim_collection(sessions, profession_id, scheduled_since=None):
     started = now()
     token = str(uuid4())
     with sessions.begin() as db:
         where = [VacancyCollection.profession_id == profession_id,
-                 or_(VacancyCollection.run_id.is_(None), VacancyCollection.started_at < started - RUN_LEASE)]
+                 collection_available(started)]
         if scheduled_since is not None:
             where.append(VacancyCollection.approved.is_(True))
-            where.append(or_(VacancyCollection.started_at.is_(None), VacancyCollection.started_at < scheduled_since))
+            where.append(or_(VacancyCollection.run_id.is_not(None), VacancyCollection.started_at.is_(None),
+                             VacancyCollection.started_at < scheduled_since))
         changed = db.execute(update(VacancyCollection).where(*where).values(
-            run_id=token, started_at=started, error=None, progress=None,
+            run_id=token, started_at=started, lease_until=started + RUN_LEASE, error=None, progress=None,
         )).rowcount
     return token if changed else None
 
@@ -237,18 +248,19 @@ def run_collection(sessions, settings, profession_id, token, fixture=None):
             details_cache, transfer_stats = None, {}
         stats = {**sample_stats(cards, working_areas(settings) if fixture is None else None), **transfer_stats,
                  "config_version": profile.config_version}
+        progress.report("saving", accepted=len(cards))
     except ImportFailure as exc:
         error = str(exc)
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         error = "HH_INVALID_RESPONSE" if fixture is None else "HH_INVALID_FILE"
     else:
-        progress.report("saving", accepted=len(cards))
         collected = now()
         with sessions.begin() as db:
             changed = db.execute(update(VacancyCollection).where(
                 VacancyCollection.profession_id == profession_id, VacancyCollection.run_id == token,
+                VacancyCollection.lease_until > collected,
             ).values(cards=cards, stats=stats, details_cache=details_cache, updated_at=collected,
-                     run_id=None, progress=None)).rowcount
+                     run_id=None, lease_until=None, progress=None)).rowcount
             if not changed:
                 return {"status": "superseded"}
             db.add(VacancySnapshot(id=token, profession_id=profession_id, collected_at=collected, stats=stats))
@@ -256,7 +268,7 @@ def run_collection(sessions, settings, profession_id, token, fixture=None):
     with sessions.begin() as db:
         db.execute(update(VacancyCollection).where(
             VacancyCollection.profession_id == profession_id, VacancyCollection.run_id == token,
-        ).values(run_id=None, error=error, progress=None))
+        ).values(run_id=None, lease_until=None, error=error, progress=None))
     return {"status": "failed", "error": error}
 
 

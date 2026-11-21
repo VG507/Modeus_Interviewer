@@ -1,6 +1,7 @@
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Literal
+from urllib.parse import urlsplit
 
 
 class Settings(BaseSettings):
@@ -20,3 +21,23 @@ class Settings(BaseSettings):
     hh_client_secret: str = Field(default="", repr=False)
     hh_areas: str = "113"
     hh_weekly_enabled: bool = True
+    documentation_weekly_enabled: bool = True
+    github_token: str = Field(default="", repr=False)
+
+    @property
+    def origin_list(self):
+        return tuple(value.strip().rstrip("/") for value in self.app_origin.split(",") if value.strip())
+
+    @property
+    def app_origins(self):
+        return frozenset(self.origin_list)
+
+    @property
+    def secure_cookie(self):
+        return self.cookie_secure or any(urlsplit(origin).scheme == "https" for origin in self.origin_list)
+
+    @property
+    def local_docs(self):
+        return bool(self.origin_list) and all(
+            urlsplit(origin).hostname in {"localhost", "127.0.0.1", "::1"} for origin in self.origin_list
+        )

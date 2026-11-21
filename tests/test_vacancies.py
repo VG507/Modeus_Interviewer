@@ -16,6 +16,7 @@ from backend.app import create_app
 from backend.db import Message, User, VacancyCollection, VacancySnapshot, database, now
 from backend.security import hash_password
 from backend.settings import Settings
+from backend.source_context import import_excerpts, sources_for_followup
 from backend.vacancy_context import sources_for_question
 from backend.vacancy_import import HeadHunter, claim_collection, prepare_cards, run_collection
 from tests.test_interview_flow import wait_for
@@ -151,6 +152,47 @@ def test_task_relevance_beats_stack_overlap():
     assert result[0]["source_field"] == "description"
 
 
+def test_reviewed_sources_require_applicability_and_rank_by_purpose(tmp_path, monkeypatch):
+    url = f"sqlite:///{(tmp_path / 'sources.db').as_posix()}"
+    monkeypatch.setenv("DATABASE_URL", url)
+    command.upgrade(Config("alembic.ini"), "head")
+    engine, sessions = database(url)
+    quote = "Проверяли план выполнения и считали медиану на одинаковых данных."
+    base = {
+        "profession_id": "python_backend", "title": "Первичный источник", "url": "https://example.org/source",
+        "text": quote, "quote": quote, "task": "Медленный запрос отчёта PostgreSQL", "technology": "PostgreSQL",
+    }
+    docs = {**base, "id": "docs", "kind": "documentation", "purpose": "behavior", "detail": "план выполнения",
+            "version": "16"}
+    research = {**base, "id": "research", "kind": "research", "purpose": "effect", "detail": "считали медиану",
+                "conditions": ["на одинаковых данных"], "method": "считали медиану на одинаковых данных"}
+    engineering = {**base, "id": "engineering", "kind": "engineering", "purpose": "implementation",
+                   "detail": "план выполнения"}
+    intake = {"role": "Python backend"}
+    state = {"facts": [{"field": "task", "text": "Ускоряли медленный запрос отчёта PostgreSQL 16.2."}]}
+
+    with sessions.begin() as db:
+        with pytest.raises(ValueError, match="quote must occur"):
+            import_excerpts(db, [docs, {**docs, "id": "invalid", "quote": "Вымышленная цитата"}])
+        assert sources_for_followup(db, intake, state, "context") == []
+        with pytest.raises(ValueError, match="measurement method"):
+            import_excerpts(db, [{**research, "method": None}])
+        assert import_excerpts(db, [engineering, docs, research, {**docs, "id": "wrong-version", "version": "16.1"}]) == 4
+        assert import_excerpts(db, [docs]) == 1
+        assert [x["excerpt_id"] for x in sources_for_followup(db, intake, state, "context")] == ["docs"]
+        assert [x["excerpt_id"] for x in sources_for_followup(db, intake, state, "action")] == ["engineering"]
+        assert [x["excerpt_id"] for x in sources_for_followup(db, intake, state, "verification", "На одинаковых данных.")] == [
+            "research", "docs",
+        ]
+        assert [x["excerpt_id"] for x in sources_for_followup(db, intake, state, "verification", "Не на одинаковых данных.")] == [
+            "docs",
+        ]
+        assert sources_for_followup(db, intake, state, "context", "Мы уже проверяли план выполнения.") == []
+        other_case = {"facts": [{"field": "task", "text": "Настраивали доставку почтовых уведомлений в PostgreSQL 16.2."}]}
+        assert sources_for_followup(db, intake, other_case, "context") == []
+    engine.dispose()
+
+
 @pytest.mark.parametrize(("text", "number", "expected"), [
     ("Как вы проверили результат?", 1, 1),
     ("Как вы проверили результат?", 7, None),
@@ -245,7 +287,8 @@ def test_repeat_collect_reuses_fresh_details_and_refreshes_stale_or_changed(tmp_
         engine.dispose()
 
 
-def test_latest_vacancy_sample_reaches_question_but_not_card(tmp_path, monkeypatch):
+@pytest.mark.parametrize("use_documentation", [False, True])
+def test_latest_vacancy_sample_reaches_question_but_not_card(tmp_path, monkeypatch, use_documentation):
     url = f"sqlite:///{(tmp_path / 'market.db').as_posix()}"
     monkeypatch.setenv("DATABASE_URL", url)
     command.upgrade(Config("alembic.ini"), "head")
@@ -271,6 +314,14 @@ def test_latest_vacancy_sample_reaches_question_but_not_card(tmp_path, monkeypat
         assert collection.error == "HH_EMPTY_SAMPLE"
         db.add_all([User(email=f"{role}@example.test", password_hash=hash_password("test-password-123"),
                          is_editor=role == "editor") for role in ("editor", "participant")])
+        if use_documentation:
+            import_excerpts(db, [{
+                "id": "explain", "profession_id": "python_backend", "title": "Документация",
+                "url": "https://example.org/docs", "text": "Сравнивайте план выполнения на одинаковых данных.",
+                "quote": "Сравнивайте план выполнения на одинаковых данных.", "detail": "план выполнения",
+                "kind": "documentation", "purpose": "behavior", "task": "Медленный запрос отчёта PostgreSQL",
+                "technology": "PostgreSQL",
+            }])
 
     task = "Отчёт PostgreSQL выполнялся 30 секунд."
     action = "Я переписал SQL-запрос."
@@ -328,9 +379,11 @@ def test_latest_vacancy_sample_reaches_question_but_not_card(tmp_path, monkeypat
         followup = wait_for(client, endpoint, "idle")
         assert followup["messages"][-1]["text"] == "Что в плане выполнения повлияло на ваш выбор?"
         assert "план выполнения" in observed[0]["task_excerpt"]
-        trace = followup["messages"][-1]["vacancy_quote"]
-        assert trace == {"title": "Middle Python backend-разработчик (обновлено)",
-                         "url": "https://hh.ru/vacancy/123", "quote": observed[0]["task_excerpt"]}
+        message = followup["messages"][-1]
+        expected = ({"title": "Документация", "url": "https://example.org/docs"} if use_documentation else
+                    {"title": "Middle Python backend-разработчик (обновлено)", "url": "https://hh.ru/vacancy/123"})
+        assert message["source_quote"] == {**expected, "quote": observed[0]["task_excerpt"]}
+        assert message["vacancy_quote"] == (None if use_documentation else message["source_quote"])
         post(endpoint + "/finish", {"expected_version": followup["version"]})
         finished = wait_for(client, endpoint, "idle")
         card = client.get(f'/api/v1/cards/{finished["card_id"]}').json()
@@ -338,7 +391,8 @@ def test_latest_vacancy_sample_reaches_question_but_not_card(tmp_path, monkeypat
 
     state = {"facts": [{"field": "task", "text": task}]}
     with sessions.begin() as db:
-        assert db.get(Message, followup["current_question_id"]).market_sources[0]["vacancy_id"] == "123"
+        trace = db.get(Message, followup["current_question_id"]).market_sources[0]
+        assert trace["excerpt_id" if use_documentation else "vacancy_id"] == ("explain" if use_documentation else "123")
         assert not sources_for_question(db, {"role": "QA"}, state, "decision")
         assert not sources_for_question(db, {"role": "Senior Python backend"}, state, "decision")
         assert not sources_for_question(db, {"role": "Python backend", "experience": "8 лет"}, state, "decision")

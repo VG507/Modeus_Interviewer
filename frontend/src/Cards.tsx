@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, commandKeys, describe } from './api';
-import type { Card, CardContent, Page, PublicCard, PublicSummary } from './api';
+import type { Card, CardContent, CardDetail, CardGap, Page, PublicCard, PublicSummary } from './api';
 
 type User = { id: string; is_editor: boolean };
 type SessionProps = { onSessionExpired: () => void };
@@ -21,19 +21,34 @@ export function CardsList({ scope, onSessionExpired }: SessionProps & {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
+  const [topics, setTopics] = useState<string[]>([]);
+  const [topic, setTopic] = useState('');
+  const [topicError, setTopicError] = useState('');
   const isCatalog = scope === 'catalog';
+
+  useEffect(() => {
+    if (!isCatalog) return;
+    const controller = new AbortController();
+    api<{ items: string[] }>('/catalog/topics', { signal: controller.signal })
+      .then(page => { setTopics(page.items); setTopicError(''); })
+      .catch(error => { if (!controller.signal.aborted) setTopicError(describe(error)); });
+    return () => controller.abort();
+  }, [isCatalog, attempt]);
 
   useEffect(() => {
     const controller = new AbortController();
     const params = new URLSearchParams();
     if (!isCatalog) params.set('scope', scope);
+    if (isCatalog && topic) params.set('topic_title', topic);
     if (cursor) params.set('cursor', cursor);
     const path = (isCatalog ? '/catalog' : '/cards') + '?' + params;
     setLoading(true);
     setError('');
     api<Page<Card | PublicSummary>>(path, { signal: controller.signal }).then(page => {
+      if (controller.signal.aborted) return;
       const entries = page.items.map(card => 'title' in card ? {
-        id: card.id, title: card.title, label: card.author_name ?? '',
+        id: card.id, title: card.title, label: [card.topic_title !== card.title ? card.topic_title : '', card.author_name]
+          .filter(Boolean).join(' · '),
       } : { id: card.id, title: card.content.title, label: status(card) });
       setItems(previous => cursor ? [...previous, ...entries] : entries);
       setNext(page.next_cursor);
@@ -43,7 +58,7 @@ export function CardsList({ scope, onSessionExpired }: SessionProps & {
       else setError(describe(error));
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [scope, isCatalog, onSessionExpired, cursor, attempt]);
+  }, [scope, isCatalog, onSessionExpired, cursor, attempt, topic]);
 
   const headings = { catalog: 'Каталог карточек', own: 'Мои карточки', review: 'На проверке', published: 'Опубликованные' };
   const empty = { catalog: 'Опубликованных карточек пока нет.', own: 'У вас пока нет карточек.',
@@ -56,14 +71,35 @@ export function CardsList({ scope, onSessionExpired }: SessionProps & {
     </nav> : null}
     <h1>{headings[scope]}</h1>
     <section className="panel saved">
+      {isCatalog && topics.length > 0 && <div className="composer">
+        <label htmlFor="catalog-topic">Тема</label>
+        <select id="catalog-topic" value={topic} onChange={event => {
+          setTopic(event.target.value);
+          setCursor(null);
+          setNext(null);
+          setItems([]);
+          setLoading(true);
+        }}>
+          <option value="">Все темы</option>
+          {topics.map(item => <option key={item}>{item}</option>)}
+        </select>
+      </div>}
+      {isCatalog && topicError && <div>
+        <p role="alert">Темы каталога недоступны. {topicError}</p>
+        <button className="secondary" onClick={() => { setCursor(null); setAttempt(value => value + 1); }}>
+          Повторить загрузку тем
+        </button>
+      </div>}
       {items.length > 0 && <ul>{items.map(card => <li key={card.id}>
         <a href={`#/${isCatalog ? 'catalog' : 'cards'}/${card.id}`}>
           {card.title}{card.label && <span>{card.label}</span>}
         </a>
       </li>)}</ul>}
       {loading && <p role="status">Загружаем карточки…</p>}
-      {!loading && !error && items.length === 0 && <p>{empty[scope]}</p>}
-      {error && <><p role="alert">{error}</p><button onClick={() => setAttempt(value => value + 1)}>Повторить загрузку</button></>}
+      {!loading && !error && items.length === 0 && <p>{isCatalog && topic ? 'По этой теме карточек пока нет.' : empty[scope]}</p>}
+      {error && <><p role="alert">{error}</p><button onClick={() => { setCursor(null); setAttempt(value => value + 1); }}>
+        Повторить загрузку
+      </button></>}
       {next && !error && <button className="secondary" disabled={loading} onClick={() => setCursor(next)}>Показать ещё</button>}
     </section>
   </>;
@@ -86,6 +122,7 @@ export function CatalogCard({ id }: { id: string }) {
       <h1>{card.title}</h1>
       {card.author_name && <p>Автор: {card.author_name}</p>}
       <div className="card-text">{card.text}</div>
+      <CardGaps content={card.content}/>
     </article> : <p role="status">Загружаем карточку…</p>}
   </>;
 }
@@ -95,6 +132,32 @@ const sections = {
   verification: 'Проверка', errors: 'Ошибки', limitations: 'Ограничения',
 } as const;
 
+const gapLabels: Record<CardGap, string> = {
+  task: sections.task, context: sections.context, action: sections.actions, decision: sections.decisions,
+  verification: sections.verification, error: sections.errors, limitation: sections.limitations,
+};
+
+function hasStructuredContent(content: CardContent) {
+  return !!(content.cases?.length || content.unknown_fields?.length || Object.keys(sections)
+    .some(key => content[key as keyof typeof sections]?.length));
+}
+
+function hasGaps(content: CardContent): boolean {
+  return !!content.unknown_fields?.length || !!content.cases?.some(hasGaps);
+}
+
+function CardGaps({ content }: { content: CardContent }) {
+  return <>
+    {!!content.unknown_fields?.length && <div>
+      <strong>Что осталось невыясненным</strong>
+      <ul>{[...new Set(content.unknown_fields)].map(gap => <li key={gap}>{gapLabels[gap] ?? gap}</li>)}</ul>
+    </div>}
+    {content.cases?.filter(hasGaps).map((item, index) => <section key={index}>
+      <h3>{item.title}</h3><CardGaps content={item}/>
+    </section>)}
+  </>;
+}
+
 function Facts({ content }: { content: CardContent }) {
   return <>
     {Object.entries(sections).map(([key, label]) => {
@@ -103,6 +166,7 @@ function Facts({ content }: { content: CardContent }) {
         <ul>{facts.map((fact, index) => <li key={index}>{fact.text}</li>)}</ul>
       </div> : null;
     })}
+    <CardGaps content={{ title: content.title, unknown_fields: content.unknown_fields }}/>
     {content.cases?.map((item, index) => <section key={index}>
       <h3>{item.title}</h3><Facts content={item}/>
     </section>)}
@@ -112,6 +176,7 @@ function Facts({ content }: { content: CardContent }) {
 export function CardScreen({ id, user, onSessionExpired }: SessionProps & { id: string; user: User }) {
   const path = `/cards/${id}`;
   const [card, setCard] = useState<Card>();
+  const [reference, setReference] = useState<CardContent>();
   const [title, setTitle] = useState('');
   const [text, setText] = useState('');
   const [showAuthor, setShowAuthor] = useState(false);
@@ -140,7 +205,13 @@ export function CardScreen({ id, user, onSessionExpired }: SessionProps & { id: 
   useEffect(() => {
     const controller = new AbortController();
     setError('');
-    api<Card>(path, { signal: controller.signal }).then(show).catch(error => {
+    api<CardDetail>(path, { signal: controller.signal }).then(data => {
+      if (controller.signal.aborted) return;
+      const previous = data.history.slice().reverse().map(event => event.details.previous?.content)
+        .find(content => content && hasStructuredContent(content));
+      setReference(previous ?? data.original.content);
+      show(data);
+    }).catch(error => {
       if (controller.signal.aborted) return;
       if (error instanceof ApiError && error.status === 401) onSessionExpired();
       else setError(describe(error));
@@ -155,7 +226,9 @@ export function CardScreen({ id, user, onSessionExpired }: SessionProps & { id: 
     setError('');
     setNotice('');
     try {
-      show(await execute<Card>(path + suffix, { expected_version: card.version, ...payload }, method));
+      const updated = await execute<Card>(path + suffix, { expected_version: card.version, ...payload }, method);
+      if (method === 'PATCH' && hasStructuredContent(card.content)) setReference(card.content);
+      show(updated);
       setNotice(success);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) onSessionExpired();
@@ -174,8 +247,7 @@ export function CardScreen({ id, user, onSessionExpired }: SessionProps & { id: 
   const published = card.publication_status === 'published';
   const inReview = card.publication_status === 'in_review';
   const dirty = title.trim() !== card.content.title || text !== card.text;
-  const hasFacts = !!card.content.cases?.length || Object.keys(sections).some(key =>
-    card.content[key as keyof typeof sections]?.length);
+  const hasFacts = hasStructuredContent(card.content);
   const disabled = busy || conflict;
 
   function save(event: FormEvent) {
@@ -218,6 +290,11 @@ export function CardScreen({ id, user, onSessionExpired }: SessionProps & { id: 
         {user.is_editor && (inReview || published) && <div className="composer">
           <p>{card.show_author ? `Отображаемое имя: ${card.author_name}` : 'Публикация без имени автора.'}</p>
           {hasFacts && <details><summary>Структурированное содержание</summary><Facts content={card.content}/></details>}
+          {!hasFacts && reference && hasStructuredContent(reference) && <details>
+            <summary>Факты из предыдущей версии</summary>
+            <p>Видны только в редактуре. В каталоге публикуется согласованная версия карточки.</p>
+            <Facts content={reference}/>
+          </details>}
         </div>}
       </section>
 

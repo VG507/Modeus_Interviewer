@@ -23,7 +23,7 @@ from backend.interview_engine import (
     synthesize,
 )
 from backend.interview_schemas import CaseState, OPEN_TOPIC_ID
-from backend.vacancy_context import sources_for_question
+from backend.source_context import sources_for_followup
 
 logger = logging.getLogger(__name__)
 
@@ -87,10 +87,13 @@ def append_message(db, interview, *, kind, text, status="processed", reply_to_qu
 def complete(db, interview):
     pending = {}
     if interview.processing_stage == "extraction":
-        pending = {key: interview.job[key] for key in ("answer_id", "current_intent")}
-        message = db.get(Message, pending["answer_id"])
-        if message.status == "queued":
-            message.status = "failed"
+        job = job_payload(interview)
+        message = job_answer(db, interview, job)
+        if message:
+            if job.get("current_intent") and answer_question(db, interview, message):
+                pending = {"answer_id": message.id, "current_intent": job["current_intent"]}
+            if message.status == "queued":
+                message.status = "failed"
     interview.status = "completing"
     interview.current_question_id = None
     queue(interview, "synthesis", completion_version=interview.version, **pending)
@@ -99,7 +102,10 @@ def complete(db, interview):
 def advance_case(db, interview):
     state = dict(interview.case_state)
     original = db.get(Topic, interview.topic_id)
-    current = db.get(Topic, state.pop("active_topic_id", None) or original.id)
+    active_id = state.pop("active_topic_id", None)
+    if original is None:
+        raise InvalidJob("Missing interview topic")
+    current = (db.get(Topic, active_id) if active_id else None) or original
     past = state.pop("past_cases", [])
     open_interview = original.id == OPEN_TOPIC_ID
     if open_interview:
@@ -108,8 +114,8 @@ def advance_case(db, interview):
         topics = list(db.scalars(select(Topic).where(
             Topic.profession_id == original.profession_id, Topic.id != OPEN_TOPIC_ID,
         ).order_by(Topic.id)))
-        position = next(index for index, item in enumerate(topics) if item.id == current.id)
-        following = topics[(position + 1) % len(topics)]
+        position = next((index for index, item in enumerate(topics) if item.id == current.id), -1)
+        following = topics[(position + 1) % len(topics)] if topics else original
     if state.get("facts"):
         past = [*past, {"title": state.get("discovered_topic") or current.title, "state": state}]
     interview.case_state = CaseState(active_topic_id=following.id, past_cases=past,
@@ -118,17 +124,57 @@ def advance_case(db, interview):
     queue(interview, "initial_question", new_case=True, same_topic=following.id == current.id)
 
 
+class InvalidJob(Exception):
+    pass
+
+
+def job_payload(interview):
+    return interview.job if isinstance(interview.job, dict) else {}
+
+
+def job_answer(db, interview, job):
+    answer_id = job.get("answer_id")
+    answer = db.get(Message, answer_id) if isinstance(answer_id, str) and answer_id else None
+    if answer and answer.session_id == interview.id and answer.kind == "answer":
+        return answer
+    return None
+
+
+def answer_question(db, interview, answer):
+    question = db.get(Message, answer.reply_to_question_id) if answer and answer.reply_to_question_id else None
+    if question and question.session_id == interview.id and question.kind == "question":
+        return question
+    return None
+
+
+def valid_job(db, interview, job):
+    stage = interview.processing_stage
+    if stage == "initial_question":
+        return True
+    if stage == "question":
+        return bool(job.get("intent"))
+    if stage == "synthesis":
+        if not isinstance(job.get("completion_version"), int):
+            return False
+        if "answer_id" not in job:
+            return True
+    elif stage != "extraction":
+        return False
+    return bool(job.get("current_intent") and answer_question(db, interview, job_answer(db, interview, job)))
+
+
 def claim(sessions, timeout):
     try:
         with sessions.begin() as db:
             interview = db.scalar(select(InterviewSession).where(or_(
                 InterviewSession.processing_status == "queued",
-                and_(InterviewSession.processing_status == "running", InterviewSession.lease_until <= now()),
+                and_(InterviewSession.processing_status == "running",
+                     or_(InterviewSession.lease_until.is_(None), InterviewSession.lease_until <= now())),
             )).order_by(InterviewSession.updated_at, InterviewSession.id).limit(1))
             if interview is None:
                 return None
             token = str(uuid4())
-            interview.job = {**interview.job, "token": token}
+            interview.job = {**job_payload(interview), "token": token}
             interview.version += 1
             interview.processing_status = "running"
             interview.lease_until = now() + timedelta(seconds=timeout + 10)
@@ -140,7 +186,7 @@ def claim(sessions, timeout):
 def get_claimed(db, interview_id, token):
     interview = db.get(InterviewSession, interview_id)
     if (interview and interview.processing_status == "running"
-            and interview.job.get("token") == token):
+            and job_payload(interview).get("token") == token):
         return interview
     return None
 
@@ -151,18 +197,29 @@ async def execute_stage(sessions, settings, interview_id, token):
         if interview is None:
             return
         job, stage, state = interview.job, interview.processing_stage, interview.case_state
-        topic = db.get(Topic, state.get("active_topic_id") or interview.topic_id)
+        if not valid_job(db, interview, job):
+            raise InvalidJob("Incomplete processing job")
+        active_id = state.get("active_topic_id")
+        topic = (db.get(Topic, active_id) if active_id else None) or db.get(Topic, interview.topic_id)
+        if topic is None:
+            raise InvalidJob("Missing interview topic")
         title, opening = state.get("discovered_topic") or topic.title, topic.opening_question
-        message = db.get(Message, job["answer_id"]) if "answer_id" in job else None
+        message = job_answer(db, interview, job)
         model_state = {**state, "intake": interview.context,
                        "recent_history": recent_history(db, interview, message)}
-        market_sources = sources_for_question(db, interview.context, state, job["intent"]) if stage == "question" else []
+        market_sources = []
+        if stage == "question":
+            market_sources = sources_for_followup(
+                db, interview.context, model_state, job["intent"], message.text if message else "",
+            )
         if market_sources:
             model_state["market_context"] = [
-                {"task_excerpt": source["task_excerpt"], "skills": source["skills"]} for source in market_sources
+                {key: source[key] for key in ("task_excerpt", "skills", "kind", "purpose", "detail", "version")
+                 if key in source and source[key] is not None} for source in market_sources
             ]
         answer = {"id": message.id, "text": message.text} if message else None
-        question = db.get(Message, message.reply_to_question_id).text if message else None
+        parent = answer_question(db, interview, message)
+        question = parent.text if parent else None
 
     final_extraction = None
     if stage == "initial_question":
@@ -210,7 +267,9 @@ async def execute_stage(sessions, settings, interview_id, token):
                 return
             interview.version += 1
             if stage == "extraction":
-                message = db.get(Message, answer["id"])
+                message = job_answer(db, interview, job)
+                if message is None:
+                    raise InvalidJob("Missing interview answer")
                 interview.case_state, message.extraction = apply_extraction(
                     state, output, message.id, job["current_intent"],
                 )
@@ -227,7 +286,9 @@ async def execute_stage(sessions, settings, interview_id, token):
             elif stage == "synthesis":
                 content, text = output
                 if final_extraction is not None:
-                    message = db.get(Message, answer["id"])
+                    message = job_answer(db, interview, job)
+                    if message is None:
+                        raise InvalidJob("Missing interview answer")
                     message.extraction = final_extraction
                     message.status = "processed"
                     interview.case_state = state
@@ -261,10 +322,12 @@ def mark_failed(sessions, interview_id, token, code):
             interview.lease_until = None
             interview.error = {
                 "code": code, "message": "Обработка прервалась. Повторите попытку.",
-                "retryable": True, "request_id": str(uuid4()),
+                "retryable": code != "INVALID_STATE", "request_id": str(uuid4()),
             }
             if interview.processing_stage == "extraction":
-                db.get(Message, interview.job["answer_id"]).status = "failed"
+                answer = job_answer(db, interview, job_payload(interview))
+                if answer is not None:
+                    answer.status = "failed"
     except StaleDataError:
         return
 
@@ -282,10 +345,19 @@ async def run_worker(sessions, settings):
                     mark_failed(sessions, *job, "PROCESSING_TIMEOUT")
                 except (InvalidModelOutput, ValidationError):
                     mark_failed(sessions, *job, "INVALID_MODEL_OUTPUT")
+                except InvalidJob:
+                    mark_failed(sessions, *job, "INVALID_STATE")
                 except (RuntimeError, httpx.RequestError) as exc:
                     code = "INVALID_MODEL_OUTPUT" if str(exc) == "LLM_INVALID_RESPONSE" else "LLM_UNAVAILABLE"
                     mark_failed(sessions, *job, code)
+                except SQLAlchemyError:
+                    raise
+                except Exception:
+                    logger.exception("Interview processing failed for %s", job[0])
+                    mark_failed(sessions, *job, "INTERNAL_SERVER_ERROR")
                 continue
         except SQLAlchemyError as exc:
             logger.warning("Interview worker database error: %s", type(exc).__name__)
+        except Exception:
+            logger.exception("Interview worker cycle failed")
         await asyncio.sleep(0.25)

@@ -1,20 +1,24 @@
 import asyncio
 import secrets
-from contextlib import suppress
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import timedelta
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import case, delete, or_, select, update
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from backend.db import LoginSession, User, database, now
-from backend.auth import current_user
+from backend.auth import current_user, limit_login
 from backend.card_api import router as card_router
+from backend.discovery_api import router as discovery_router
+from backend.documentation import schedule_documentation
+from backend.github_evidence import schedule_github_evidence
+from backend.http_errors import LimitRequestBody, error_response, unhandled_error
 from backend.interview_api import router as interview_router
 from backend.interview_worker import run_worker
+from backend.maintenance import schedule_pruning
 from backend.security import check_password, hash_password, token_hash
 from backend.settings import Settings
 from backend.vacancy_api import router as vacancy_router
@@ -33,9 +37,12 @@ def create_app(settings: Settings | None = None):
 
     @asynccontextmanager
     async def lifespan(app):
-        workers = [asyncio.create_task(run_worker(sessions, settings))]
+        workers = [asyncio.create_task(run_worker(sessions, settings)), asyncio.create_task(schedule_pruning(sessions))]
         if settings.hh_weekly_enabled and configured(settings):
             workers.append(asyncio.create_task(schedule_collections(sessions, settings)))
+        if settings.documentation_weekly_enabled:
+            workers.append(asyncio.create_task(schedule_documentation(sessions)))
+        workers.append(asyncio.create_task(schedule_github_evidence(sessions, settings)))
         try:
             yield
         finally:
@@ -46,31 +53,30 @@ def create_app(settings: Settings | None = None):
                     await worker
             engine.dispose()
 
-    app = FastAPI(title="Modeus MVP", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Modeus MVP", version="0.1.0", lifespan=lifespan,
+                  openapi_url="/openapi.json" if settings.local_docs else None)
+    app.add_middleware(LimitRequestBody)
+    app.add_exception_handler(Exception, unhandled_error)
     app.state.engine = engine
     app.state.sessions = sessions
     app.state.settings = settings
-    app.state.app_origin = settings.app_origin
+    app.state.app_origin = next(iter(settings.origin_list), "")
+    app.state.app_origins = settings.app_origins
     app.include_router(interview_router)
     app.include_router(card_router)
     app.include_router(vacancy_router)
+    app.include_router(discovery_router)
 
-    @app.exception_handler(HTTPException)
+    @app.exception_handler(StarletteHTTPException)
     async def error_handler(request, exc):
-        detail = exc.detail if isinstance(exc.detail, dict) else {"code": exc.detail, "message": exc.detail}
-        return JSONResponse(status_code=exc.status_code, headers=exc.headers, content={"error": {
-            "retryable": False, "request_id": secrets.token_hex(8), **detail,
-        }})
+        return error_response(exc.status_code, exc.detail, exc.headers)
 
     @app.exception_handler(RequestValidationError)
     async def validation_handler(request, exc):
-        return JSONResponse(status_code=422, content={"error": {
-            "code": "VALIDATION_ERROR", "message": "Invalid request data",
-            "retryable": False, "request_id": secrets.token_hex(8),
-        }})
+        return error_response(422, "VALIDATION_ERROR")
 
     def require_origin(request):
-        if request.headers.get("origin") != settings.app_origin:
+        if request.headers.get("origin") not in app.state.app_origins:
             raise HTTPException(403, "ORIGIN_REJECTED")
 
     @app.get("/api/v1/health")
@@ -85,25 +91,35 @@ def create_app(settings: Settings | None = None):
     @app.post("/api/v1/auth/login")
     def login(body: LoginBody, request: Request, response: Response):
         require_origin(request)
+        limit_login(sessions, request)
         with sessions() as db:
             user = db.scalar(select(User).where(User.email == body.email.strip().lower()))
-            valid = check_password(body.password, user.password_hash if user else dummy_hash)
-            if user and user.locked_until and user.locked_until > now():
+            stamp = now()
+            if user and user.locked_until and user.locked_until > stamp:
                 raise HTTPException(429, "LOGIN_TEMPORARILY_LOCKED")
-            if not user or not valid:
-                if user:
-                    user.failed_logins += 1
-                    if user.failed_logins >= 5:
-                        user.locked_until = now() + timedelta(minutes=15)
-                    db.commit()
+            valid = check_password(body.password, user.password_hash if user else dummy_hash)
+            if not user:
                 raise HTTPException(401, "INVALID_CREDENTIALS")
-            user.failed_logins = 0
-            user.locked_until = None
+            unlocked = update(User).where(
+                User.id == user.id, User.password_hash == user.password_hash,
+                or_(User.locked_until.is_(None), User.locked_until <= stamp),
+            ).execution_options(synchronize_session=False)
+            if not valid:
+                attempts = case((User.locked_until.is_not(None), 1), else_=User.failed_logins + 1)
+                lock = case((attempts >= 5, stamp + timedelta(minutes=15)), else_=None)
+                locked_until = db.execute(unlocked.values(failed_logins=attempts, locked_until=lock)
+                                          .returning(User.locked_until)).scalar()
+                if locked_until is not None:
+                    db.execute(delete(LoginSession).where(LoginSession.user_id == user.id))
+                db.commit()
+                raise HTTPException(401, "INVALID_CREDENTIALS")
+            if not db.execute(unlocked.values(failed_logins=0, locked_until=None)).rowcount:
+                raise HTTPException(401, "INVALID_CREDENTIALS")
             token = secrets.token_urlsafe(32)
             db.add(LoginSession(token_hash=token_hash(token), user_id=user.id,
                                 expires_at=now() + timedelta(hours=settings.session_hours)))
             db.commit()
-            response.set_cookie("modeus_session", token, httponly=True, secure=settings.cookie_secure,
+            response.set_cookie("modeus_session", token, httponly=True, secure=settings.secure_cookie,
                                 samesite="lax", path="/", max_age=settings.session_hours * 3600)
             return {"id": user.id, "is_editor": user.is_editor}
 
@@ -114,13 +130,12 @@ def create_app(settings: Settings | None = None):
     @app.post("/api/v1/auth/logout", status_code=204)
     def logout(request: Request):
         require_origin(request)
-        with sessions() as db:
-            session = db.get(LoginSession, token_hash(request.cookies.get("modeus_session", "")))
-            if session:
-                db.delete(session)
-                db.commit()
+        token = request.cookies.get("modeus_session")
+        if token:
+            with sessions.begin() as db:
+                db.execute(delete(LoginSession).where(LoginSession.token_hash == token_hash(token)))
         response = Response(status_code=204)
-        response.delete_cookie("modeus_session", path="/")
+        response.delete_cookie("modeus_session", path="/", secure=settings.secure_cookie, httponly=True)
         return response
 
     return app

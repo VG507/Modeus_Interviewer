@@ -11,6 +11,7 @@ export type Message = {
   status: 'draft' | 'queued' | 'processing' | 'processed' | 'failed';
   assessment?: 'relevant' | 'unclear' | 'unrelated' | 'declined' | null;
   vacancy_quote?: { title: string; url: string; quote: string } | null;
+  source_quote?: { title: string; url: string; quote: string } | null;
 };
 export type Interview = {
   id: string; topic_id: string; context: Context; version: number; updated_at: string;
@@ -23,7 +24,8 @@ export type Interview = {
 };
 export type Detail = Interview & { messages: Message[] };
 export type AnswerResult = { interview: Interview; answer: Message };
-export type CardContent = { title: string; cases?: CardContent[] } & Partial<Record<
+export type CardGap = 'task' | 'context' | 'action' | 'decision' | 'verification' | 'error' | 'limitation';
+export type CardContent = { title: string; cases?: CardContent[]; unknown_fields?: CardGap[] } & Partial<Record<
   'task' | 'context' | 'actions' | 'decisions' | 'verification' | 'errors' | 'limitations',
   { text: string }[]
 >>;
@@ -33,6 +35,10 @@ export type Card = {
   publication_status: 'draft' | 'in_review' | 'published';
   review_status: 'unreviewed' | 'needs_changes' | 'reviewed';
   review: { decision: 'accept' | 'return' | 'keep_private' | 'unpublish'; comment: string } | null;
+};
+export type CardDetail = Card & {
+  original: { content: CardContent };
+  history: { details: { previous?: { content: CardContent } } }[];
 };
 export type PublicSummary = {
   id: string; title: string; profession_id: string; topic_title: string;
@@ -47,6 +53,12 @@ const messages: Record<string, string> = {
   INVALID_STATE: 'Действие недоступно в текущем состоянии.',
   INVALID_CREDENTIALS: 'Проверьте почту и пароль.',
   LOGIN_TEMPORARILY_LOCKED: 'Слишком много попыток. Повторите через 15 минут.',
+  LOGIN_RATE_LIMIT: 'Слишком много попыток входа. Повторите позже.',
+  ACCOUNT_TEMPORARILY_LOCKED: 'Аккаунт временно заблокирован.',
+  ACTIVE_INTERVIEW_LIMIT: 'Завершите одно из активных интервью, чтобы начать новое.',
+  PAYLOAD_TOO_LARGE: 'Запрос слишком большой. Сократите данные и повторите.',
+  CURSOR_INVALID: 'Список изменился. Откройте его заново.',
+  INTERNAL_SERVER_ERROR: 'Произошла ошибка на сервере.',
   UNAUTHENTICATED: 'Сессия закончилась. Войдите снова.',
   INTERVIEW_NOT_FOUND: 'Интервью не найдено или недоступно.',
   TOPIC_NOT_FOUND: 'Тема больше недоступна.',
@@ -58,11 +70,21 @@ const messages: Record<string, string> = {
   PROCESSING_TIMEOUT: 'Модель не успела ответить.',
   LLM_UNAVAILABLE: 'Модель недоступна. Если вы используете Ollama, проверьте, что она запущена.',
   INVALID_MODEL_OUTPUT: 'Модель вернула ответ в неподходящем формате.',
+  DISCOVERY_BUSY: 'Сбор из этого источника уже выполняется. Попробуйте позже.',
+  DISCOVERY_RATE_LIMIT: 'Источник ограничил запросы. Попробуйте позже.',
+  DISCOVERY_TIMEOUT: 'Источник не ответил вовремя. Попробуйте позже.',
+  DISCOVERY_QUERY_INVALID: 'Проверьте формат репозиториев или тем GitHub.',
+  DISCOVERY_UNAVAILABLE: 'Источник временно недоступен или вернул неожиданный ответ.',
+  DOCUMENTATION_TARGET_INVALID: 'Выберите источники из списка официальной документации.',
+  DOCUMENTATION_QUOTE_INVALID: 'Цитата должна дословно встречаться в тексте раздела, а деталь — в цитате.',
+  DOCUMENTATION_REVISION_CHANGED: 'Редакция источника изменилась. Откройте актуальную версию для проверки.',
 };
 
 export class ApiError extends Error {
-  constructor(readonly status: number, readonly code: string) {
-    super(messages[code] ?? `Сервер вернул ошибку HTTP ${status}.`);
+  constructor(readonly status: number, readonly code: string, retryAfter?: number, message?: string) {
+    super(code === 'DISCOVERY_RATE_LIMIT' && retryAfter !== undefined ?
+      `Источник ограничил запросы. Повторите не раньше чем через ${retryAfter} сек.` :
+      messages[code] ?? message ?? `Сервер вернул ошибку HTTP ${status}.`);
   }
 }
 
@@ -78,7 +100,10 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch('/api/v1' + path, { ...options, credentials: 'same-origin' });
   if (!response.ok) {
     const data = await response.json().catch(() => null);
-    throw new ApiError(response.status, data?.error?.code ?? '');
+    const retryAfter = response.headers.get('Retry-After');
+    const code = data?.error?.code ?? '';
+    throw new ApiError(response.status, code, retryAfter && /^\d+$/.test(retryAfter) ?
+      Number(retryAfter) : undefined, code === 'DOCUMENTATION_REVIEW_INVALID' ? data.error.message : undefined);
   }
   return (response.status === 204 ? undefined : await response.json()) as T;
 }

@@ -97,6 +97,18 @@ def complete(db, interview):
     queue(interview, "synthesis", completion_version=interview.version, **pending)
 
 
+ATTACK_STOPPED = ("Интервью остановлено: в ответе есть команды для бота вместо рассказа о работе. "
+                  "Этот ответ не обработан, карточка соберётся из предыдущих ответов.")
+
+
+def stop_after_attack(db, interview, answer, kind):
+    """An answer that gives orders to the model ends the interview; the card keeps only the earlier answers."""
+    logger.warning("Interview %s stopped after a prompt injection attempt (%s)", interview.id, kind)
+    answer.status = "failed"
+    append_message(db, interview, kind="control", text=ATTACK_STOPPED)
+    complete(db, interview)
+
+
 def advance_case(db, interview):
     state = dict(interview.case_state)
     original = db.get(Topic, interview.topic_id)

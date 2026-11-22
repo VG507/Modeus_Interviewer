@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     hh_areas: str = "113"
     hh_weekly_enabled: bool = True
     trudvsem_collection_enabled: bool = True
+    esco_collection_enabled: bool = True
+    esco_version: str = Field(default="v1.2.0", max_length=24, pattern=r"^v\d+\.\d+\.\d+$")
     documentation_weekly_enabled: bool = True
     hn_collection_enabled: bool = True
     github_token: str = Field(default="", repr=False)

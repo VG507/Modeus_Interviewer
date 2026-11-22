@@ -31,6 +31,7 @@ class User(Base):
     failed_logins: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    interview_profile: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
 
 
 class LoginSession(Base):
@@ -306,6 +307,27 @@ class ProfessionCollectionRun(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime)
     lease_until: Mapped[datetime | None] = mapped_column(DateTime)
     steps: Mapped[dict] = mapped_column(JSON)
+
+
+class EscoProfile(Base):
+    __tablename__ = "esco_profiles"
+    profession_id: Mapped[str] = mapped_column(ForeignKey("vacancy_collections.profession_id"), primary_key=True)
+    version: Mapped[str] = mapped_column(String(24))
+    target: Mapped[str] = mapped_column(String(180))
+    match: Mapped[str] = mapped_column(String(12))
+    collected_at: Mapped[datetime] = mapped_column(DateTime)
+    occupation: Mapped[dict] = mapped_column(JSON)
+    skills: Mapped[list] = mapped_column(JSON)
+
+
+class OnetProfile(Base):
+    __tablename__ = "onet_profiles"
+    profession_id: Mapped[str] = mapped_column(ForeignKey("vacancy_collections.profession_id"), primary_key=True)
+    version: Mapped[str] = mapped_column(String(16))
+    occupation_code: Mapped[str] = mapped_column(String(10))
+    occupation_title: Mapped[str] = mapped_column(String(150))
+    collected_at: Mapped[datetime] = mapped_column(DateTime)
+    tasks: Mapped[list] = mapped_column(JSON)
 
 
 class HeadHunterRequestWindow(Base):

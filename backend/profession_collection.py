@@ -11,11 +11,13 @@ from sqlalchemy.orm import load_only
 
 from backend.agent_skills import collect_skills
 from backend.db import (
-    DiscoveryCandidate, DiscoveryItem, DocumentationSubscription, ProfessionCollectionRun, VacancyCollection, now,
+    DiscoveryCandidate, DiscoveryItem, DocumentationSubscription, EscoProfile, ProfessionCollectionRun,
+    VacancyCollection, now,
 )
 from backend.discovery import ACTIVE_PROVIDERS, DEFAULT_REPOS, DiscoveryBusy, candidate_status, collect
 from backend.discovery_fetch import CollectionError, ProviderRateLimit
 from backend.documentation import collect_documentation, iso_time
+from backend.esco import classification_url, collect_esco, target_for
 from backend.hn import HackerNewsUnavailable, collect_hn, profile_terms
 from backend.openalex import collect_research
 from backend.trudvsem import collect_trudvsem, lock_current_profile, save_sample
@@ -24,7 +26,7 @@ from backend.vacancy_samples import current_sample, sample_is_fresh, trudvsem_sa
 
 
 logger = logging.getLogger(__name__)
-SOURCES = ("hh", "trudvsem", "github", "trends", "docs", "hn", "openalex", "skills")
+SOURCES = ("hh", "trudvsem", "esco", "github", "trends", "docs", "hn", "openalex", "skills")
 ACTIVE = {"queued", "running"}
 RETRYABLE = {"partial", "failed", "busy", "interrupted"}
 LEASE = timedelta(minutes=2)
@@ -47,7 +49,7 @@ def output(run):
     return {"id": run.run_id, "started_at": iso_time(run.started_at), "running": running, "steps": steps}
 
 
-def start(db, profession, retry_id=None, source=None):
+def start(db, profession, retry_id=None, source=None, *, only=None):
     # Lock the profession row so two clicks cannot enqueue overlapping runs.
     db.execute(update(VacancyCollection).where(VacancyCollection.profession_id == profession)
                .values(profession_id=profession))
@@ -61,7 +63,7 @@ def start(db, profession, retry_id=None, source=None):
     else:
         if current and current["running"]:
             return current, None
-        steps = {key: {"status": "queued"} for key in SOURCES}
+        steps = {key: {"status": "queued"} for key in ((only,) if only else SOURCES)}
     if run is None:
         run = ProfessionCollectionRun(profession_id=profession)
         db.add(run)
@@ -83,6 +85,17 @@ def change_steps(sessions, profession, run_id, changes):
                 sample = None
                 step = {"status": "failed", "code": "TRUDVSEM_SUPERSEDED"}
             changes = {**changes, "trudvsem": step}
+        esco = changes.get("esco", {})
+        esco_profile = esco.get("profile")
+        if esco_profile:
+            db.execute(update(VacancyCollection).where(VacancyCollection.profession_id == profession)
+                       .values(profession_id=profession))
+            profile = db.get(VacancyCollection, profession)
+            step = {key: value for key, value in esco.items() if key != "profile"}
+            if (esco_profile["target"], esco_profile["match"]) != target_for(profile):
+                esco_profile = None
+                step = {"status": "failed", "code": "ESCO_SUPERSEDED"}
+            changes = {**changes, "esco": step}
         run = db.get(ProfessionCollectionRun, profession)
         current = now()
         if run is None or run.run_id != run_id or run.lease_until is None or run.lease_until <= current:
@@ -95,6 +108,8 @@ def change_steps(sessions, profession, run_id, changes):
         ).values(steps=steps, lease_until=lease_until)).rowcount
         if changed and sample:
             save_sample(db, profession, run_id, current, cards, stats)
+        if changed and esco_profile:
+            db.merge(EscoProfile(profession_id=profession, collected_at=current, **esco_profile))
         return bool(changed)
 
 
@@ -131,6 +146,8 @@ def refresh_sources(sessions, settings, profession, run_id, only=None):
 def refresh_source(sessions, settings, profession, source):
     if source == "trudvsem":
         return collect_trudvsem(sessions, settings, profession)
+    if source == "esco":
+        return collect_esco(sessions, settings, profession)
     if source == "skills":
         return collect_skills(sessions, settings, profession)
     if source == "openalex":
@@ -185,7 +202,7 @@ def quality(db, profession, settings):
     current = now()
     profile = db.get(VacancyCollection, profession, options=[load_only(
         VacancyCollection.updated_at, VacancyCollection.stats, VacancyCollection.approved,
-        VacancyCollection.config_version,
+        VacancyCollection.config_version, VacancyCollection.discovery_searches,
     )])
     stamp = profile.updated_at
     result = {"hh": {
@@ -197,6 +214,18 @@ def quality(db, profession, settings):
         "current_config": current_sample(profile.stats, profile),
         "source": profile.stats.get("source"),
     }, "automatic_check_enabled": bool(settings.llm_base_url and settings.llm_model)}
+    target, match = target_for(profile)
+    snapshot = db.get(EscoProfile, profession)
+    result["esco"] = {
+        "enabled": settings.esco_collection_enabled, "target": target, "match": match, "sample": None,
+    }
+    if snapshot:
+        result["esco"]["sample"] = {
+            "checked_at": iso_time(snapshot.collected_at), "version": snapshot.version,
+            "title": snapshot.occupation["title"], "url": classification_url(snapshot.occupation["uri"]),
+            "skills": len(snapshot.skills), "match": snapshot.match,
+            "current_config": (snapshot.target, snapshot.match, snapshot.version) == (target, match, settings.esco_version),
+        }
     trudvsem = trudvsem_samples(db, profession, include_cards=False).get(profession)
     if trudvsem:
         result["trudvsem"] = {

@@ -31,10 +31,10 @@ FOLLOW_SECONDS = 600
 # Control messages that only echo the participant's own buttons.
 OWN_CONTROLS = {"Пропуск вопроса", "Завершение интервью"}
 INTAKE = (
-    ("role", "Какая у вас роль? Например, «Python backend-разработчик».", 200),
-    ("experience", "Какой у вас опыт в этой роли?", 1000),
-    ("responsibilities", "За что вы отвечаете в работе?", 1000),
-    ("conditions", "В каком контексте вы работаете: команда, продукт, ограничения?", 1000),
+    ("role", "Кем вы работаете? Например, «Python backend-разработчик».", 200),
+    ("experience", "Как давно вы этим занимаетесь?", 1000),
+    ("responsibilities", "Какими задачами вы обычно занимаетесь?", 1000),
+    ("conditions", "Что важно знать о вашей работе? Можно рассказать о продукте, команде или ограничениях.", 1000),
 )
 STAGES = {
     "initial_question": "Готовлю первый вопрос",
@@ -52,6 +52,7 @@ ONE_SHOT = {"skip", "retry", "finish-yes", "finish-no", "intake-skip", "role", "
             "publish", "publish-anon", "publish-name"}
 COMMANDS = [
     {"command": "new", "description": "Начать новое интервью"},
+    {"command": "profile", "description": "Обновить анкету"},
     {"command": "interviews", "description": "Мои интервью"},
     {"command": "status", "description": "Показать текущий вопрос"},
     {"command": "skip", "description": "Пропустить вопрос"},
@@ -62,6 +63,7 @@ COMMANDS = [
 HELP = (
     "Modeus расспрашивает о конкретных рабочих случаях и собирает из ответов карточку знаний.\n\n"
     "/new — начать новое интервью\n"
+    "/profile — обновить анкету\n"
     "/interviews — мои интервью\n"
     "/status — показать текущий вопрос\n"
     "/skip — пропустить вопрос\n"
@@ -526,7 +528,10 @@ class TelegramBot:
             text = "Ввод отменён." if command == "/cancel" else escape(HELP)
             return await self.send(account.chat_id, text)
         if command == "/new":
-            return await self.start_intake(account)
+            return await self.new_interview(account)
+        if command == "/profile":
+            profile = await self.request(account.user_id, "GET", "/interview-profile")
+            return await self.start_intake(account, profile=profile, edit=True)
         if command == "/interviews":
             return await self.list_interviews(account)
         if command == "/status":
@@ -544,9 +549,10 @@ class TelegramBot:
             await self.quietly("editMessageReplyMarkup", chat_id=account.chat_id,
                                message_id=message["message_id"], reply_markup={"inline_keyboard": []})
         if action == "new":
-            await self.start_intake(account)
+            await self.new_interview(account)
         elif action == "intake-skip" and account.state.get("step") in {name for name, *_ in INTAKE[1:]}:
-            await self.intake_answer(account, "")
+            field = account.state["step"]
+            await self.intake_answer(account, (account.state.get("intake") or {}).get(field, ""))
         elif action == "role" and account.state.get("step") == INTAKE[0][0]:
             catalog = await asyncio.to_thread(professions, self.sessions)
             title = next((item.title for item in catalog if item.profession_id == value), "")
@@ -633,10 +639,19 @@ class TelegramBot:
                     raise
         self.follow(account.telegram_id)
 
-    async def start_intake(self, account):
-        await self.set_state(account, step=INTAKE[0][0], intake={})
-        await self.send(account.chat_id, "Сначала несколько вопросов о вашей работе: они помогут задавать "
-                                         f"точные уточнения.\n\n{escape(INTAKE[0][1])}")
+    async def new_interview(self, account):
+        profile = await self.request(account.user_id, "GET", "/interview-profile")
+        if profile:
+            if account.state.get("step"):
+                account = await self.set_state(account, step=None, intake=None, intake_edit=None)
+            return await self.create_interview(account)
+        await self.start_intake(account)
+
+    async def start_intake(self, account, *, profile=None, edit=False):
+        await self.set_state(account, step=INTAKE[0][0], intake=profile or {}, intake_edit=edit)
+        intro = ("Обновим анкету. Необязательные ответы можно оставить как есть." if profile else
+                 "Расскажите немного о работе. Сохраню ответы для следующих интервью.")
+        await self.send(account.chat_id, f"{intro}\n\n{escape(INTAKE[0][1])}")
 
     async def intake_answer(self, account, value, listed=False):
         names = [name for name, *_ in INTAKE]
@@ -666,10 +681,18 @@ class TelegramBot:
         intake = {**account.state.get("intake", {}), name: value}
         if index + 1 < len(INTAKE):
             await self.set_state(account, step=names[index + 1], intake=intake)
+            skip_label = "Оставить как есть" if intake.get(names[index + 1]) else "Пропустить"
             return await self.send(account.chat_id, note + escape(INTAKE[index + 1][1]),
-                                   [[("Пропустить", "intake-skip")]])
-        account = await self.set_state(account, step=None, intake=None)
-        created = await self.request(account.user_id, "POST", "/interviews", {"context": intake})
+                                   [[(skip_label, "intake-skip")]])
+        await self.request(account.user_id, "PUT", "/interview-profile", intake)
+        edit = account.state.get("intake_edit")
+        account = await self.set_state(account, step=None, intake=None, intake_edit=None)
+        if edit:
+            return await self.send(account.chat_id, "Анкета сохранена.", [[("Начать интервью", "new")]])
+        await self.create_interview(account)
+
+    async def create_interview(self, account):
+        created = await self.request(account.user_id, "POST", "/interviews", {})
         await self.set_state(account, interview_id=created["id"], seen=0)
         await self.send(account.chat_id, "Интервью началось. Отвечайте на вопросы обычными сообщениями, "
                                          "подробно, как рассказали бы коллеге. Под вопросом есть кнопки "

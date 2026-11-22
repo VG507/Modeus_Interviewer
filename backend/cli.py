@@ -16,6 +16,7 @@ from backend.documentation import collect_documentation
 from backend.github_evidence import process_pending
 from backend.hn import HackerNewsUnavailable, collect_hn
 from backend.llm import check_llm
+from backend.onet import VERSION as ONET_VERSION, OnetError, import_tasks as import_onet_tasks
 from backend.openalex import collect_research
 from backend.security import hash_password
 from backend.settings import Settings
@@ -95,6 +96,9 @@ def main():
     research = sub.add_parser("fetch-openalex", help="Collect and verify scholarly articles for one profession")
     research.add_argument("profession_id")
     research.add_argument("--query", action="append", help="Search by a practical task (up to four queries)")
+    onet = sub.add_parser("import-onet", help="Import O*NET tasks and ratings for supported Modeus professions")
+    onet.add_argument("--version", default=ONET_VERSION, help="O*NET database release")
+    onet.add_argument("--csv-dir", type=Path, help="Read task_statements.csv and task_ratings.csv from this directory")
     skills = sub.add_parser("fetch-skills", help="Collect and verify curated Agent Skills")
     skills.add_argument("profession_id")
     hn = sub.add_parser("fetch-hn", help="Collect IT stories and comments from Hacker News")
@@ -119,6 +123,16 @@ def main():
     listing.add_argument("--limit", type=number_between(1, 100), default=30)
     args = parser.parse_args()
     settings = Settings()
+    if args.command == "import-onet":
+        engine, sessions = database(settings.database_url)
+        try:
+            result = import_onet_tasks(sessions, args.version, args.csv_dir)
+        except OnetError as exc:
+            parser.exit(1, f"import-onet: {exc}\n")
+        finally:
+            engine.dispose()
+        print(json.dumps(result))
+        return
     if args.command in DISCOVERY_COMMANDS or args.command in {
         "fetch-docs", "fetch-hn", "fetch-openalex", "fetch-skills", "list-discovery",
     }:

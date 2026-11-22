@@ -21,12 +21,12 @@ class Schema(BaseModel):
 
 
 class ProjectContext(Schema):
-    task: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)]
+    task: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
     period: ProjectText = ""
     role: ProjectText = ""
-    responsibility: ProjectText = ""
+    responsibility: ContextText = ""
     stack: ProjectText = ""
-    constraints: ProjectText = ""
+    constraints: ContextText = ""
 
 
 class InterviewContext(Schema):
@@ -40,7 +40,7 @@ class InterviewContext(Schema):
 
 class CreateInterview(Schema):
     topic_id: Identifier | None = None
-    context: InterviewContext
+    context: InterviewContext | None = Field(default=None, exclude_if=lambda context: context is None)
 
 
 class VersionedRequest(Schema):

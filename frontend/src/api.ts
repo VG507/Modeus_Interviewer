@@ -63,6 +63,7 @@ const messages: Record<string, string> = {
   LOGIN_RATE_LIMIT: 'Слишком много попыток входа. Повторите позже.',
   ACCOUNT_TEMPORARILY_LOCKED: 'Аккаунт временно заблокирован.',
   ACTIVE_INTERVIEW_LIMIT: 'Завершите одно из активных интервью, чтобы начать новое.',
+  INTERVIEW_PROFILE_REQUIRED: 'Сначала заполните анкету о вашей работе.',
   PAYLOAD_TOO_LARGE: 'Запрос слишком большой. Сократите данные и повторите.',
   CURSOR_INVALID: 'Список изменился. Откройте его заново.',
   INTERNAL_SERVER_ERROR: 'Произошла ошибка на сервере.',

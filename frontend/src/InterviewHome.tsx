@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { api, ApiError, commandKeys, describe, type Interview, type Page, type ProjectContext } from './api';
+import { api, ApiError, command, commandKeys, describe, type Context, type Interview, type Page, type ProjectContext } from './api';
 
 const statusLabels = {
   active: 'В процессе',
@@ -9,10 +9,99 @@ const statusLabels = {
 
 const dateFormat = new Intl.DateTimeFormat('ru', { dateStyle: 'medium', timeStyle: 'short' });
 const previewCount = 6;
-const projectFields: [keyof ProjectContext, string][] = [
-  ['task', 'Задача проекта'], ['period', 'Период'], ['role', 'Ваша роль в проекте'],
-  ['responsibility', 'За что вы отвечали'], ['stack', 'Стек'], ['constraints', 'Ограничения'],
+const projectFields: [keyof ProjectContext, string, string, number][] = [
+  ['task', 'Что нужно было сделать в проекте?', 'Например, перенести оплату на нового провайдера', 1000],
+  ['period', 'Когда вы над ним работали?', 'Например, с мая по сентябрь 2025', 300],
+  ['role', 'Какая у вас была роль?', 'Например, разработчик в команде платежей', 300],
+  ['responsibility', 'Что именно вы делали сами?', 'Например, подключили API и настроили повтор платежа', 1000],
+  ['stack', 'Какие инструменты использовали?', 'Например, Python, FastAPI, PostgreSQL', 300],
+  ['constraints', 'Что усложняло работу?', 'Например, нельзя было останавливать приём платежей', 1000],
 ];
+const emptyProject: ProjectContext = { task: '', period: '', role: '', responsibility: '', stack: '', constraints: '' };
+
+function ProfileForm({ profile, busy, onSave, onCancel }: {
+  profile: Context | null; busy: boolean; onSave: (context: Context) => void; onCancel: () => void;
+}) {
+  const [projects, setProjects] = useState(profile?.projects ?? []);
+  const [error, setError] = useState('');
+
+  function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const read = (field: string) => String(form.get(field) ?? '').trim();
+    const role = read('role');
+    if (!role) return setError('Укажите, кем вы работаете.');
+    const filled = projects
+      .map(project => ({
+        task: project.task.trim(), period: project.period.trim(), role: project.role.trim(),
+        responsibility: project.responsibility.trim(), stack: project.stack.trim(), constraints: project.constraints.trim(),
+      }))
+      .filter(project => Object.values(project).some(Boolean));
+    if (filled.some(project => !project.task)) return setError('Опишите задачу каждого добавленного проекта.');
+    setError('');
+    onSave({ role, experience: read('experience'), responsibilities: read('responsibilities'),
+      conditions: read('conditions'), projects: filled });
+  }
+
+  return <form onSubmit={save} className="interview-profile-form">
+    <fieldset disabled={busy}>
+      <div className="interview-profile-basics">
+        <div>
+          <label htmlFor="profile-role">Кем вы работаете?</label>
+          <input id="profile-role" name="role" defaultValue={profile?.role} required maxLength={200}
+            placeholder="Например, backend-разработчик" />
+        </div>
+        <div>
+          <label htmlFor="profile-experience">Как давно вы этим занимаетесь? <span>Необязательно</span></label>
+          <textarea id="profile-experience" name="experience" defaultValue={profile?.experience} maxLength={1000}
+            rows={2} placeholder="Например, три года, последние полгода в команде платежей" />
+        </div>
+        <div>
+          <label htmlFor="profile-responsibilities">Какими задачами вы обычно занимаетесь?</label>
+          <textarea id="profile-responsibilities" name="responsibilities" defaultValue={profile?.responsibilities}
+            maxLength={1000} rows={3} placeholder="Например, разрабатываю API и разбираю сбои в оплате" />
+        </div>
+        <div>
+          <label htmlFor="profile-conditions">Что важно знать о вашей работе?</label>
+          <textarea id="profile-conditions" name="conditions" defaultValue={profile?.conditions} maxLength={1000}
+            rows={3} placeholder="Например, работаю в команде из пяти человек, сервис должен быть доступен круглосуточно" />
+        </div>
+      </div>
+      <details className="interview-projects" open={projects.length ? true : undefined}>
+        <summary>Проекты <span>{projects.length ? `${projects.length} из 3` : 'Необязательно'}</span></summary>
+        <p>Добавьте проекты, о которых вам было бы интересно рассказать.</p>
+        {projects.map((project, index) =>
+          <fieldset key={index}>
+            <legend>Проект {index + 1}</legend>
+            <div className="interview-project-fields">
+              {projectFields.map(([field, label, placeholder, limit]) => {
+                const id = `profile-project-${index}-${field}`;
+                return <div key={field}>
+                  <label htmlFor={id}>{label}</label>
+                  <textarea id={id} value={project[field]} maxLength={limit} rows={2} placeholder={placeholder}
+                    onChange={event => {
+                      const value = event.target.value;
+                      setProjects(current => current.map((item, position) =>
+                        position === index ? { ...item, [field]: value } : item));
+                    }} />
+                </div>;
+              })}
+            </div>
+            <button type="button" className="quiet" aria-label={`Убрать проект ${index + 1}`}
+              onClick={() => setProjects(current => current.filter((_, position) => position !== index))}>Убрать проект</button>
+          </fieldset>
+        )}
+        {projects.length < 3 && <button type="button" className="secondary"
+          onClick={() => setProjects(current => [...current, emptyProject])}>Добавить проект</button>}
+      </details>
+      {error && <p role="alert">{error}</p>}
+      <div className="actions">
+        <button>{busy ? 'Сохраняем…' : 'Сохранить анкету'}</button>
+        {profile && <button type="button" className="quiet" onClick={onCancel}>Отмена</button>}
+      </div>
+    </fieldset>
+  </form>;
+}
 
 export function InterviewHome({ onOpen, onSessionExpired }: {
   onOpen: (id: string) => void; onSessionExpired: () => void;
@@ -21,9 +110,10 @@ export function InterviewHome({ onOpen, onSessionExpired }: {
   const [loadError, setLoadError] = useState('');
   const [actionError, setActionError] = useState('');
   const [attempt, retry] = useState(0);
-  const [projectCount, setProjectCount] = useState(1);
+  const [profile, setProfile] = useState<Context | null>(null);
+  const [editing, setEditing] = useState(false);
   const [historyExpanded, setHistoryExpanded] = useState(false);
-  const [busy, setBusy] = useState<'create' | 'more'>();
+  const [busy, setBusy] = useState<'create' | 'more' | 'save'>();
   const execute = useRef(commandKeys());
   const lock = useRef(false);
 
@@ -31,10 +121,11 @@ export function InterviewHome({ onOpen, onSessionExpired }: {
     const controller = new AbortController();
     setLoadError('');
     const options = { signal: controller.signal };
-    api<Page<Interview>>('/interviews', options)
-      .then(interviews => {
+    Promise.all([api<Page<Interview>>('/interviews', options), api<Context | null>('/interview-profile', options)])
+      .then(([interviews, savedProfile]) => {
         if (controller.signal.aborted) return;
         setPage(interviews);
+        setProfile(savedProfile);
       })
       .catch(error => {
         if (controller.signal.aborted) return;
@@ -44,7 +135,7 @@ export function InterviewHome({ onOpen, onSessionExpired }: {
     return () => controller.abort();
   }, [attempt, onSessionExpired]);
 
-  async function run(action: 'create' | 'more', task: () => Promise<void>) {
+  async function run(action: 'create' | 'more' | 'save', task: () => Promise<void>) {
     if (lock.current) return;
     lock.current = true;
     setBusy(action);
@@ -59,32 +150,17 @@ export function InterviewHome({ onOpen, onSessionExpired }: {
     }
   }
 
-  function create(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const value = (field: string) => String(form.get(field) ?? '').trim();
-    if (!value('role')) {
-      setActionError('Укажите вашу роль.');
-      return;
-    }
-    const projects: ProjectContext[] = [];
-    for (let index = 0; index < projectCount; index++) {
-      const field = (name: keyof ProjectContext) => value(`project-${index}-${name}`);
-      const project = { task: field('task'), period: field('period'), role: field('role'),
-        responsibility: field('responsibility'), stack: field('stack'), constraints: field('constraints') };
-      if (!Object.values(project).some(Boolean)) continue;
-      if (!project.task) {
-        setActionError(`Укажите задачу проекта ${index + 1}.`);
-        return;
-      }
-      projects.push(project);
-    }
+  function create() {
     void run('create', async () => {
-      const created = await execute.current<Interview>('/interviews', {
-        context: { role: value('role'), experience: value('experience'),
-          responsibilities: value('responsibilities'), conditions: value('conditions'), projects },
-      });
+      const created = await execute.current<Interview>('/interviews', {});
       onOpen(created.id);
+    });
+  }
+
+  function saveProfile(context: Context) {
+    void run('save', async () => {
+      setProfile(await command<Context>('/interview-profile', context, undefined, 'PUT'));
+      setEditing(false);
     });
   }
 
@@ -108,35 +184,24 @@ export function InterviewHome({ onOpen, onSessionExpired }: {
   const showHistoryToggle = historyExpanded || sorted.length > previewCount || !!page.next_cursor;
 
   return <div className="workspace">
-    <form className="panel" onSubmit={create} aria-labelledby="new-title">
-      <h2 id="new-title">Новое интервью</h2>
-      <p>Расскажите о рабочем случае своими словами. Тема появится из вашего рассказа.</p>
-      <fieldset disabled={!!busy}>
-        <label htmlFor="role">Ваша роль</label>
-        <input id="role" name="role" placeholder="Например, Python backend-разработчик" required maxLength={200}/>
-        <label htmlFor="experience">Опыт <span>необязательно</span></label>
-        <input id="experience" name="experience" maxLength={1000}/>
-        <label htmlFor="responsibilities">За что вы отвечаете <span>необязательно</span></label>
-        <textarea id="responsibilities" name="responsibilities" rows={2} maxLength={1000}/>
-        <label htmlFor="conditions">В каком контексте вы работаете <span>необязательно</span></label>
-        <textarea id="conditions" name="conditions" rows={2} maxLength={1000}/>
-        <details className="interview-projects">
-          <summary>Проекты <span>необязательно</span></summary>
-          {Array.from({ length: projectCount }, (_, index) =>
-            <fieldset key={index}>
-              <legend>Проект {index + 1}</legend>
-              {projectFields.map(([name, label]) => {
-                const id = `project-${index}-${name}`;
-                return <div key={name}><label htmlFor={id}>{label}</label><input id={id} name={id} maxLength={300}/></div>;
-              })}
-            </fieldset>)}
-          {projectCount < 3 && <button className="secondary" type="button" onClick={() => setProjectCount(n => n + 1)}>
-            Добавить проект
-          </button>}
-        </details>
-        <button>{busy === 'create' ? 'Создаём…' : 'Начать интервью'}</button>
-      </fieldset>
-    </form>
+    <section className="panel interview-start" aria-labelledby="new-title">
+      <h2 id="new-title">{!profile || editing ? 'О вашей работе' : 'Новое интервью'}</h2>
+      {!profile || editing ? <>
+        <p className="interview-profile-intro">Укажите, кем вы работаете. Остальное можно пропустить.
+          Ответы сохраняются для следующих интервью.</p>
+        <ProfileForm profile={profile} busy={!!busy} onSave={saveProfile} onCancel={() => {
+          setEditing(false);
+          setActionError('');
+        }} />
+      </> : <>
+        <p>Вспомните рабочий случай, о котором хотите рассказать.</p>
+        <div className="interview-profile-summary">
+          <div><span>Ваша анкета</span><strong>{profile.role}</strong></div>
+          <button type="button" className="quiet" disabled={!!busy} onClick={() => setEditing(true)}>Изменить анкету</button>
+        </div>
+        <button disabled={!!busy} onClick={create}>{busy === 'create' ? 'Создаём…' : 'Начать интервью'}</button>
+      </>}
+    </section>
     <section className="panel saved" aria-labelledby="saved-title">
       <h2 id="saved-title">Мои интервью</h2>
       {sorted.length === 0 ? <p>Сохранённых интервью пока нет.</p>

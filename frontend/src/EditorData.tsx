@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, describe } from './api';
 import { Discovery } from './Discovery';
+import { OnetTasks } from './OnetTasks';
 import { ProfessionCollection } from './ProfessionCollection';
 import { Vacancies } from './Vacancies';
 
@@ -62,6 +63,8 @@ export function EditorData({ view, onSessionExpired }: { view: DataView; onSessi
         onProfileSaved={profileSaved} onSessionExpired={onSessionExpired}/>
     </div>
     <div hidden={view !== 'sources'}>
+      {view === 'sources' && profession && <OnetTasks key={profession} profession={profession}
+        onSessionExpired={onSessionExpired}/>}
       {profession ? <Discovery key={profession} profession={profession} collectionRefresh={collectionRefresh}
         onSessionExpired={onSessionExpired}/> : profiles &&
         <p>Добавьте профессию на вкладке «Вакансии», чтобы собирать источники.</p>}

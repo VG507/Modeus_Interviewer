@@ -18,7 +18,8 @@ from backend.injection import injection_attempt
 from backend.interview_engine import choose_intent
 from backend.interview_schemas import (
     AnswerResult, CaseState, CreateAnswer, CreateInterview, InterviewDetail,
-    Identifier, InterviewView, MessageView, OPEN_TOPIC_ID, SourceQuote, TopicSummary, UpdateAnswer, VersionedRequest,
+    Identifier, InterviewContext, InterviewView, MessageView, OPEN_TOPIC_ID, SourceQuote, TopicSummary, UpdateAnswer,
+    VersionedRequest,
 )
 from backend.interview_worker import (
     InvalidJob, advance_case, append_message, complete, interview_question, job_answer, job_payload, queue,
@@ -179,6 +180,40 @@ def topics(request: Request, actor: Actor):
         ]}
 
 
+def interview_profile(db, owner):
+    profile = db.scalar(select(User.interview_profile).where(User.id == owner))
+    if profile is not None:
+        return profile
+    # Users who already interviewed can reuse the most recent questionnaire.
+    return db.scalar(select(InterviewSession.context).where(InterviewSession.owner_id == owner)
+                     .order_by(InterviewSession.created_at.desc(), InterviewSession.id.desc()).limit(1))
+
+
+def checked_context(body):
+    context = body.model_dump()
+    fields = [value for key, value in context.items() if key != "projects"]
+    fields.extend(value for project in context.get("projects", []) for value in project.values())
+    if any(injection_attempt(value) for value in fields):
+        raise HTTPException(422, "INJECTION_DETECTED")
+    return context
+
+
+@router.get("/interview-profile", response_model=InterviewContext | None)
+def get_interview_profile(request: Request, actor: Actor):
+    with request.app.state.sessions() as db:
+        return interview_profile(db, actor["id"])
+
+
+@router.put("/interview-profile", response_model=InterviewContext)
+def save_interview_profile(request: Request, actor: Actor, body: InterviewContext):
+    if request.headers.get("origin") not in request.app.state.app_origins:
+        raise HTTPException(403, "ORIGIN_REJECTED")
+    context = checked_context(body)
+    with request.app.state.sessions.begin() as db:
+        db.execute(update(User).where(User.id == actor["id"]).values(interview_profile=context))
+    return context
+
+
 @router.post("/interviews", status_code=201, response_model=InterviewView)
 def create_interview(request: Request, actor: Actor, key: CommandKey, body: CreateInterview):
     def create(db, _):
@@ -190,11 +225,13 @@ def create_interview(request: Request, actor: Actor, key: CommandKey, body: Crea
         ))
         if active >= 5:
             raise HTTPException(409, "ACTIVE_INTERVIEW_LIMIT")
-        context = body.context.model_dump()
-        fields = [value for key, value in context.items() if key != "projects"]
-        fields += [value for project in context.get("projects", []) for value in project.values()]
-        if any(injection_attempt(value) for value in fields if isinstance(value, str)):
-            raise HTTPException(422, "INJECTION_DETECTED")
+        profile = body.context or interview_profile(db, actor["id"])
+        if profile is None:
+            raise HTTPException(422, "INTERVIEW_PROFILE_REQUIRED")
+        context = checked_context(InterviewContext.model_validate(profile))
+        if body.context is None:
+            db.execute(update(User).where(User.id == actor["id"], User.interview_profile.is_(None))
+                       .values(interview_profile=context))
         interview = InterviewSession(owner_id=actor["id"], topic_id=topic_id, context=context,
                                      case_state=CaseState(open_interview=topic_id == OPEN_TOPIC_ID).model_dump())
         queue(interview, "initial_question")

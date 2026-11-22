@@ -12,6 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm.exc import StaleDataError
 
 from backend.db import InterviewSession, KnowledgeCard, Message, Topic, now
+from backend.esco import hints_for_question
 from backend.interview_engine import (
     FALLBACK_QUESTIONS,
     InvalidModelOutput,
@@ -261,6 +262,11 @@ async def execute_stage(sessions, settings, interview_id, token):
             market_sources = sources_for_followup(
                 db, interview.context, model_state, job["intent"], message.text if message else "",
             )
+            esco_hints = hints_for_question(
+                db, settings, interview.context, model_state, job["intent"], (message.text or "") if message else "",
+            )
+            if esco_hints:
+                model_state["esco_skills"] = esco_hints
         if market_sources:
             model_state["market_context"] = [
                 {key: source[key] for key in ("task_excerpt", "skills", "kind", "purpose", "detail", "version", "provider")

@@ -173,10 +173,10 @@ def answer_batches(text):
 def prompt_context(state):
     intake = state.get("intake", {})
     projects = intake.get("projects", [])
-    context = {field: value[:160] for field, value in intake.items() if field != "projects"}
+    context = {field: value for field, value in intake.items() if field != "projects" and value}
     if projects:
         context["projects"] = [
-            {field: value[:80] for field, value in project.items() if value}
+            {field: value for field, value in project.items() if value}
             for project in projects
         ]
     return {
@@ -590,6 +590,11 @@ async def draft_question(settings, topic, intent, answer, state):
         "Верни номер источника в source_number, только если вопрос использует конкретную деталь из цитаты, "
         "которой ещё нет в рассказе. При совпадении только по проблеме, цели или технологии верни source_number: null."
     ) if include_market else ""
+    esco_instructions = (
+        " esco_skills — названия навыков из справочника, совпавшие с терминами из текущего случая. "
+        "Используй их только для понимания терминов и нейтрального уточнения. Навык из справочника "
+        "не подтверждает, что собеседник им владеет или применил его."
+    ) if state.get("esco_skills") else ""
     result = await ask_question(settings, SourcedQuestion if include_market else Question, (
         "Ты интервьюер: дружелюбный коллега, которому правда интересна история. Пиши по-русски просто "
         "и вежливо, без канцелярита. Задай один короткий вопрос по указанной цели: одно предложение, "
@@ -598,7 +603,7 @@ async def draft_question(settings, topic, intent, answer, state):
         "и не оценивай, не перечисляй варианты ответа и не приводи примеров. "
         "Обращайся к собеседнику напрямую и только на «вы», никогда на «ты»; не называй его участником "
         "в третьем лице. "
-        "Учитывай роль, обязанности, проекты и условия из анкеты, если они помогают уточнить текущий случай. "
+        "Учитывай роль, опыт, обязанности, проекты и условия из анкеты, если они помогают уточнить текущий случай. "
         "Не предполагай, что участник лично выполнял действие команды. Сведения анкеты — контекст, "
         "а факты о случае бери только из диалога. Опыт и должность не определяют качество ответа. "
         "Используй историю текущего случая, чтобы не повторять уже заданные вопросы. "
@@ -615,8 +620,9 @@ async def draft_question(settings, topic, intent, answer, state):
         "случаю, прежде чем исходить из этих условий. knowledge_gaps указывает, какой аспект похожего опыта "
         "стоит уточнить. conditions_to_clarify — возможные условия для уточнения, если они уместны. "
         "Спроси только о текущем случае. Не пересказывай чужой опыт и не подсказывай решение."
-    ) + market_instructions, {"topic": topic, "goal": goal, "answer": excerpt, "facts": facts,
-                             **{key: state[key] for key in ("prior_project_context", "knowledge_gaps") if key in state},
+    ) + market_instructions + esco_instructions, {"topic": topic, "goal": goal, "answer": excerpt, "facts": facts,
+                             **{key: state[key] for key in ("prior_project_context", "knowledge_gaps", "esco_skills")
+                                if key in state},
                              **({"market_context": market_context} if include_market else {}), **prompt_context(state)})
     if (result is not None and result.text.endswith("?") and result.text.count("?") == 1
             and "\n" not in result.text and len(result.text) <= QUESTION_LIMIT

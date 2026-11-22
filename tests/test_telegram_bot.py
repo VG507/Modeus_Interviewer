@@ -115,6 +115,10 @@ def test_interview_in_telegram(database_url, monkeypatch):
             assert fake.texts()[-1].startswith("Карточка отправлена редактору")
             await send(press(7, f"publish-anon:{card_id}"))
             assert fake.texts()[-1] == "Карточка уже отправлена редактору."
+            await send(message(7, "/new"))
+            next_id = (await asyncio.to_thread(load_account, app.state.sessions, 7)).state["interview_id"]
+            assert next_id != interview_id
+            assert fake.texts()[-1].startswith("Вспомните один конкретный случай")
         finally:
             await bot.close()
 
@@ -184,7 +188,7 @@ def test_unknown_profession_lists_the_catalog(database_url, monkeypatch):
             await bot.dispatch(message(9, "Java-разработчик"))
             assert fake.texts()[-1].startswith("Профессии «Java-разработчик» у нас пока нет.")
             await bot.dispatch(press(9, "role:qa"))
-            assert fake.texts()[-1] == "Какой у вас опыт в этой роли?"
+            assert fake.texts()[-1] == "Как давно вы этим занимаетесь?"
         finally:
             await bot.close()
 
@@ -222,10 +226,10 @@ def test_role_typos_and_wrong_layout(database_url, monkeypatch):
                                         "«Тестировщик»?")
             assert {"layout-yes", "layout-no"} <= set(fake.buttons())
             await bot.dispatch(press(4, "layout-yes"))
-            assert fake.texts()[-1] == "Какой у вас опыт в этой роли?"
+            assert fake.texts()[-1] == "Как давно вы этим занимаетесь?"
             await bot.dispatch(message(4, "/new"))
             await bot.dispatch(message(4, "Тестеровщик"))
-            assert fake.texts()[-1] == "Записал профессию: QA.\n\nКакой у вас опыт в этой роли?"
+            assert fake.texts()[-1] == "Записал профессию: QA.\n\nКак давно вы этим занимаетесь?"
         finally:
             await bot.close()
 

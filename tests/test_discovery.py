@@ -11,7 +11,7 @@ from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
-from backend import agent_skills, discovery, documentation, github_evidence, interview_engine, interview_worker
+from backend import agent_skills, discovery, documentation, esco, github_evidence, interview_engine, interview_worker
 from backend import openalex, profession_collection
 from backend import discovery_api
 from backend.app import create_app
@@ -558,6 +558,122 @@ def test_profession_collection_can_retry_only_failed_source(sessions, monkeypatc
             assert rejected.json()["error"]["code"] == "COLLECTION_RETRY_UNAVAILABLE"
         assert client.get(path).json()["run"] == complete
         assert len(calls) == len(profession_collection.SOURCES) + 1
+
+
+def test_esco_collection_from_hal_to_editor_and_interview(sessions, monkeypatch):
+    uri = "http://data.europa.eu/esco/occupation/f2b15a0e-e65a-438a-affb-29b9d50b77d1"
+    python = {"uri": "http://data.europa.eu/esco/skill/10000000-0000-4000-8000-000000000001",
+              "title": "Python (computer programming)"}
+    other = {"uri": "http://data.europa.eu/esco/skill/10000000-0000-4000-8000-000000000002",
+             "title": "COBOL"}
+    requests = []
+    unavailable = False
+
+    def respond(request):
+        requests.append(request.url.path)
+        assert request.url.params["language"] == "en"
+        assert request.url.params["selectedVersion"] == "v1.2.0"
+        if unavailable:
+            return httpx.Response(429)
+        if request.url.path.endswith("/search"):
+            assert request.url.params["text"] == "software developer"
+            return httpx.Response(200, json={"_embedded": {"results": [
+                {"title": "other developer", "uri": uri.replace("f2b15a0e", "11111111")},
+                {"title": "software developer", "uri": uri},
+            ]}})
+        assert request.url.params["uri"] == uri
+        return httpx.Response(200, json={
+            "uri": uri, "title": "software developer", "code": "2512.4",
+            "description": {"en": {"literal": "<p>Builds software.</p><script>hidden</script>"}},
+            "alternativeLabel": {"en": ["software engineer"]},
+            "_links": {"hasEssentialSkill": [python, python], "hasOptionalSkill": [python, other]},
+            "_embedded": None,
+        })
+
+    client_type = httpx.Client
+    monkeypatch.setattr(esco.httpx, "Client", lambda **kwargs: client_type(
+        **kwargs, transport=httpx.MockTransport(respond),
+    ))
+    app = create_app()
+    actor = {"id": "actor", "is_editor": False}
+    app.dependency_overrides[current_user] = lambda: actor
+    path = "/api/v1/discovery/collection/python_backend"
+    headers = {"Origin": app.state.app_origin}
+    with TestClient(app) as client:
+        assert client.get(path + "/esco").status_code == 403
+        actor["is_editor"] = True
+        assert client.get(path + "/esco").status_code == 404
+        assert client.post(path + "/esco", headers=headers).status_code == 202
+        run = client.get(path).json()["run"]
+        assert run["steps"] == {"esco": {"status": "ok", "collected": 2}}
+        result = client.get(path + "/esco").json()
+        assert result["occupation"]["description"] == "Builds software."
+        assert result["occupation"]["aliases"] == ["software engineer"]
+        assert result["skills"][0]["relations"] == ["essential", "optional"]
+        assert result["skills"][0]["title_ru"] == "Программирование на Python"
+        assert "/classification/skills?" in result["skills"][0]["url"]
+        assert [part.rsplit("/", 1)[1] for part in requests] == ["search", "occupation"]
+
+        with sessions.begin() as db:
+            db.get(VacancyCollection, "python_backend").approved = True
+            facts = {"facts": [{"field": "task", "text": "Разобрал сбой в коде на питоне"}]}
+            intake = {"role": "Python backend developer"}
+            assert esco.hints_for_question(db, app.state.settings, intake, facts, "action", "") == [
+                "Программирование на Python",
+            ]
+            facts["facts"][0]["text"] = "Разобрал сбой в коде"
+            assert esco.hints_for_question(db, app.state.settings, intake, facts, "action", "Проверял Python") == [
+                "Программирование на Python",
+            ]
+            assert esco.hints_for_question(db, app.state.settings, intake, facts, "action", "Использовал PHP") == []
+
+        unavailable = True
+        assert client.post(path + "/esco", headers=headers).status_code == 202
+        run = client.get(path).json()["run"]
+        assert run["steps"]["esco"] == {"status": "failed", "code": "ESCO_RATE_LIMITED"}
+        assert client.get(path + "/esco").json() == result
+        assert client.put(path + "/esco", headers=headers, json={
+            "target": "https://example.com/occupation/1", "match": "exact",
+        }).status_code == 422
+        assert client.put(path + "/esco", headers=headers, json={"target": uri, "match": "exact"}).status_code == 204
+        assert not client.get(path).json()["quality"]["esco"]["sample"]["current_config"]
+        requests.clear()
+        unavailable = False
+        assert client.post(path, headers=headers, json={"run_id": run["id"], "source": "esco"}).status_code == 202
+        assert requests == ["/esco/api/resource/occupation"]
+        assert client.get(path + "/esco").json()["match"] == "exact"
+
+
+def test_esco_ambiguous_labels_and_invalid_relations():
+    entry = {"title": "software developer",
+             "uri": "http://data.europa.eu/esco/occupation/10000000-0000-4000-8000-000000000001"}
+    duplicate = {**entry, "uri": entry["uri"][:-1] + "2"}
+    transport = httpx.MockTransport(lambda request: httpx.Response(
+        200, json={"_embedded": {"results": [entry, duplicate]}},
+    ))
+    with httpx.Client(base_url=esco.API, transport=transport) as client:
+        with pytest.raises(esco.EscoError, match="ESCO_AMBIGUOUS"):
+            esco.find_occupation(client, entry["title"], float("inf"))
+    with pytest.raises(esco.EscoError, match="ESCO_INVALID_RESPONSE"):
+        esco.occupation_skills({"_links": {"hasEssentialSkill": [entry]}})
+
+
+def test_esco_disregards_result_if_mapping_changes_during_fetch(sessions):
+    with sessions.begin() as db:
+        _, token = profession_collection.start(db, "python_backend", only="esco")
+    with sessions.begin() as db:
+        db.get(VacancyCollection, "python_backend").discovery_searches = {
+            "esco": {"target": "web developer", "match": "exact"},
+        }
+    assert profession_collection.change_steps(sessions, "python_backend", token, {"esco": {
+        "status": "ok", "collected": 1, "profile": {"target": "software developer", "match": "broader"},
+    }})
+    app = create_app()
+    app.dependency_overrides[current_user] = lambda: {"id": "actor", "is_editor": True}
+    with TestClient(app) as client:
+        path = "/api/v1/discovery/collection/python_backend"
+        assert client.get(path).json()["run"]["steps"]["esco"] == {"status": "failed", "code": "ESCO_SUPERSEDED"}
+        assert client.get(path + "/esco").status_code == 404
 
 
 def test_active_profession_run_is_reused_and_expired_run_can_be_retried(sessions, monkeypatch):

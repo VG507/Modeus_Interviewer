@@ -9,16 +9,18 @@ from pydantic import Field, StringConstraints, ValidationError
 from sqlalchemy import select, update
 
 from backend import profession_collection
-from backend.db import ProfessionCollectionRun, VacancyCollection
+from backend.db import EscoProfile, OnetProfile, ProfessionCollectionRun, VacancyCollection
 from backend.discovery import (
     DiscoveryBusy, InvalidDiscoveryQuery, candidate_output, collect, item_entry, list_candidates,
     save_documentation_review,
 )
 from backend.discovery_fetch import CollectionError, ProviderRateLimit
-from backend.documentation import check_watches, collect_documentation, configure_watches
+from backend.documentation import check_watches, collect_documentation, configure_watches, iso_time
 from backend.documentation_fetch import TARGETS
+from backend.esco import classification_url, concept_uri, localized_skill
 from backend.interview_api import Actor
 from backend.interview_schemas import Schema, ShortText
+from backend.onet import profile_output as onet_profile_output
 from backend.source_context import ExcerptText
 from backend.vacancy_api import check_profile, require_editor, require_editor_write
 
@@ -44,7 +46,12 @@ class DocumentationProfile(Schema):
 
 class CollectionRetry(Schema):
     run_id: Annotated[str, StringConstraints(min_length=36, max_length=36)]
-    source: Literal["hh", "trudvsem", "github", "trends", "docs", "hn", "openalex", "skills"]
+    source: Literal["hh", "trudvsem", "esco", "github", "trends", "docs", "hn", "openalex", "skills"]
+
+
+class EscoMapping(Schema):
+    target: Annotated[str, StringConstraints(strip_whitespace=True, max_length=180)]
+    match: Literal["exact", "broader"]
 
 
 class DocumentationConfig(DocumentationProfile):
@@ -123,6 +130,64 @@ def collect_profession(request: Request, tasks: BackgroundTasks, actor: Actor, p
                        profession_id, token, source)
     if run is None:
         raise HTTPException(409, "COLLECTION_RETRY_UNAVAILABLE")
+    return run
+
+
+@router.get("/collection/{profession_id}/onet")
+def onet_profile(request: Request, actor: Actor, profession_id: str):
+    require_editor(actor)
+    with request.app.state.sessions() as db:
+        check_profile(db, profession_id)
+        profile = db.get(OnetProfile, profession_id)
+        return onet_profile_output(profile) if profile else None
+
+
+@router.get("/collection/{profession_id}/esco")
+def esco_profile(request: Request, actor: Actor, profession_id: str):
+    require_editor(actor)
+    with request.app.state.sessions() as db:
+        check_profile(db, profession_id)
+        snapshot = db.get(EscoProfile, profession_id)
+        if snapshot is None:
+            raise HTTPException(404, "ESCO_NO_SAMPLE")
+        return {
+            "occupation": {**snapshot.occupation, "url": classification_url(snapshot.occupation["uri"])},
+            "skills": [localized_skill(skill) for skill in snapshot.skills],
+            "version": snapshot.version, "checked_at": iso_time(snapshot.collected_at), "match": snapshot.match,
+        }
+
+
+@router.put("/collection/{profession_id}/esco", status_code=204)
+def set_esco_mapping(request: Request, actor: Actor, profession_id: str, mapping: EscoMapping):
+    require_editor_write(request, actor)
+    target = mapping.target
+    if "://" in target:
+        target = concept_uri(target, "occupation")
+        if not target:
+            raise HTTPException(422, "ESCO_INVALID_URI")
+    with request.app.state.sessions.begin() as db:
+        check_profile(db, profession_id)
+        db.execute(update(VacancyCollection).where(VacancyCollection.profession_id == profession_id)
+                   .values(profession_id=profession_id))
+        profile = db.get(VacancyCollection, profession_id)
+        searches = dict(profile.discovery_searches or {})
+        if target:
+            searches["esco"] = {"target": target, "match": mapping.match}
+        else:
+            searches.pop("esco", None)
+        profile.discovery_searches = searches
+
+
+@router.post("/collection/{profession_id}/esco", status_code=202)
+def collect_esco_profile(request: Request, tasks: BackgroundTasks, actor: Actor, profession_id: str):
+    require_editor_write(request, actor)
+    sessions = request.app.state.sessions
+    with sessions.begin() as db:
+        check_profile(db, profession_id)
+        run, token = profession_collection.start(db, profession_id, only="esco")
+    if token:
+        tasks.add_task(profession_collection.refresh_sources, sessions, request.app.state.settings,
+                       profession_id, token, "esco")
     return run
 
 

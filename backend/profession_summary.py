@@ -7,12 +7,21 @@ scores come from the data, so every cell can be traced back to a source.
 
 import asyncio
 import json
+import math
 import re
 from collections import Counter
 from datetime import date, datetime
+from itertools import combinations
 from pathlib import Path
 
 from openpyxl import Workbook
+from openpyxl.chart import Reference, ScatterChart, Series
+from openpyxl.chart.label import DataLabelList
+from openpyxl.chart.marker import Marker
+from openpyxl.chart.shapes import GraphicalProperties
+from openpyxl.chart.text import RichText
+from openpyxl.drawing.line import LineProperties
+from openpyxl.drawing.text import CharacterProperties, Paragraph, ParagraphProperties
 from openpyxl.formatting.rule import DataBarRule
 from openpyxl.styles import Alignment, Font, PatternFill
 from sqlalchemy import select
@@ -42,18 +51,30 @@ DISPLAY = {
     "celery": "Celery", "kafka": "Kafka", "rabbitmq": "RabbitMQ", "asyncio": "asyncio", "sqlalchemy": "SQLAlchemy",
     "pytest": "pytest", "ci/cd": "CI/CD", "nginx": "Nginx", "prometheus": "Prometheus", "grafana": "Grafana",
     "mysql": "MySQL", "javascript": "JavaScript", "typescript": "TypeScript", "node.js": "Node.js", "react": "React",
-    "helm": "Helm", "terraform": "Terraform", "ansible": "Ansible",
+    "helm": "Helm", "terraform": "Terraform", "ansible": "Ansible", "html": "HTML", "css": "CSS", "vue": "Vue",
+    "angular": "Angular", "playwright": "Playwright", "selenium": "Selenium", "cypress": "Cypress",
+    "postman": "Postman", "llm": "LLM",
 }
-# The most frequent vacancy wordings of each kind that the model sees.
-STATEMENT_LIMIT = 80
+# The vacancy wordings of each kind that the model sees: every vacancy first, then the most frequent.
+# Real wordings rarely repeat, so a small limit hides most of each vacancy and understates demand.
+STATEMENT_LIMIT = 250
 SKILL_LIMIT = 60
 MERGE_SCORE = 0.9
+EMBED_BATCH = 64
+# Samples taken on the same day differ by noise, not by demand.
+TREND_MIN_DAYS = 14
+BULLET = re.compile(r"^\s*(?:[-–—•*·]+|\d{1,2}[.)])\s*")
 RECENT_DAYS, FRESH_DAYS, STALE_DAYS = 30, 45, 180
 DEMO_DIR = Path(__file__).resolve().parent.parent / "data" / "profession"
 # A change of 20 percentage points between the first and the last vacancy sample is the full trend.
 TREND_SPAN = 0.2
 LEVELS = ((70, "Обязательно"), (45, "Важно"), (25, "Полезно"), (0, "Нишевое"))
 LEVEL_FILLS = {"Обязательно": "C6EFCE", "Важно": "FFEB9C", "Полезно": "DDEBF7", "Нишевое": "EDEDED"}
+# Graph marks: competencies blue, skills of several competencies orange, the rest recessive gray.
+GRAPH_COLORS = {"competency": "2A78D6", "shared": "EB6834", "single": "A3A29B",
+                "shared_edge": "F4B49A", "single_edge": "D9D8D3", "ink": "0B0B0B", "muted": "52514E"}
+# Height of one graph row in centimetres: room for one 8 pt label.
+GRAPH_ROW_CM = 0.6
 METHOD = (
     "Значимость (0–100) = 75 × доля вакансий + 15 × вес в справочниках + 10 × практика + 10 × тренд. "
     "Вес в справочниках: ESCO «обязательный» — 1, «дополнительный» — 0,5; для компетенции также важность "
@@ -114,10 +135,6 @@ def shown(value):
     return f"{value[8:10]}.{value[5:7]}.{value[:4]}" if value else "—"
 
 
-def display(skill):
-    return DISPLAY.get(skill, skill)
-
-
 def by_source_text(counts):
     """«HH 18, «Работа России» 5»: the larger count first, HH before other sources on a tie."""
     order = list(SOURCE_NAMES)
@@ -131,10 +148,18 @@ def provider_name(provider):
 
 
 def vacancy_entry(card, source):
+    # Skills are stored normalized; the vacancy's own spelling survives in its evidence.
+    labels = {item["field_path"][len("skills."):]: item["quote"] for item in card.get("evidence") or []
+              if item.get("field_path", "").startswith("skills.") and item.get("source_field", "").startswith("key_skills")}
     return {"id": card["id"], "source": card.get("source") or source, "url": card.get("url"),
             "title": card.get("title"), "published_at": day(card.get("published_at")), "level": card.get("level"),
             "skills": card.get("skills") or [], "tasks": card.get("tasks") or [],
-            "requirements": card.get("requirements") or []}
+            "requirements": card.get("requirements") or [], **({"skill_labels": labels} if labels else {})}
+
+
+def skill_counts(cards):
+    return dict(Counter(skill for card in cards for skill in {canonical_skill(label) for label in card.get("skills") or []}
+                        if skill))
 
 
 def gather(db, profession_id):
@@ -163,7 +188,8 @@ def gather(db, profession_id):
             "collected_at": day(snapshot.collected_at),
             "source": "trudvsem" if any(card.get("source") == "trudvsem" for card in cards) else "hh",
             "vacancies": snapshot.stats.get("vacancies") or len(cards),
-            "skill_counts": snapshot.stats.get("vacancy_skill_counts") or {},
+            # Stored cards are recounted with the current normalization; older samples keep only their counts.
+            "skill_counts": skill_counts(cards) if cards else snapshot.stats.get("vacancy_skill_counts") or {},
         })
     esco = db.get(EscoProfile, profession_id)
     onet = db.get(OnetProfile, profession_id)
@@ -224,25 +250,51 @@ def for_period(materials, since, until):
             "sources": [item for item in materials["sources"] if within(item.get("retrieved_on"), since, until)]}
 
 
+def wording(text):
+    """A duty line without its bullet, or None for a heading such as «1. Работа с требованиями:»."""
+    text = BULLET.sub("", text).strip().rstrip(";,.").strip()
+    return None if not text or text.endswith(":") else text
+
+
+def by_frequency(item):
+    return item["kind"], -len(item["vacancies"]), item["text"]
+
+
 def vacancy_statements(materials):
     """Vacancy wordings grouped by their words, the most frequent first."""
     grouped = {}
     for kind, field in (("vacancy_task", "tasks"), ("vacancy_requirement", "requirements")):
         for vacancy in materials["vacancies"]:
-            for text in vacancy.get(field) or []:
+            for text in filter(None, map(wording, vacancy.get(field) or [])):
                 key = (kind, task_key(text))
                 if key[1]:
                     entry = grouped.setdefault(key, {"kind": kind, "text": text, "vacancies": {}})
                     entry["vacancies"].setdefault(vacancy["id"], text)
-    return sorted(grouped.values(), key=lambda item: (item["kind"], -len(item["vacancies"]), item["text"]))
+    return sorted(grouped.values(), key=by_frequency)
+
+
+def representative(items, limit):
+    """Up to limit wordings: first one for every vacancy not yet covered, then the most frequent ones."""
+    chosen, covered = {}, set()
+    for item in items:
+        if len(chosen) < limit and set(item["vacancies"]) - covered:
+            chosen[id(item)] = item
+            covered.update(item["vacancies"])
+    for item in items:
+        if len(chosen) >= limit:
+            break
+        chosen.setdefault(id(item), item)
+    return sorted(chosen.values(), key=by_frequency)
 
 
 def merge_similar(settings, statements):
     """Join vacancy wordings that mean the same; the second value says whether embeddings were used."""
     if not statements or not embeddings_configured(settings):
         return statements, False
+    texts = [item["text"] for item in statements]
     try:
-        vectors = embed(settings, [item["text"] for item in statements])
+        vectors = [vector for start in range(0, len(texts), EMBED_BATCH)
+                   for vector in embed(settings, texts[start:start + EMBED_BATCH])]
     except RuntimeError:
         return statements, False
     kept = []
@@ -254,8 +306,7 @@ def merge_similar(settings, statements):
         else:
             for vacancy_id, text in item["vacancies"].items():
                 target["vacancies"].setdefault(vacancy_id, text)
-    merged = sorted((item for item, _ in kept), key=lambda item: (item["kind"], -len(item["vacancies"]), item["text"]))
-    return merged, True
+    return sorted((item for item, _ in kept), key=by_frequency), True
 
 
 def case_entries(materials):
@@ -273,7 +324,8 @@ def case_entries(materials):
 
 def statements_of(settings, materials):
     vacancy_items, merged = merge_similar(settings, vacancy_statements(materials))
-    items = [item for kind in VACANCY_KINDS for item in [i for i in vacancy_items if i["kind"] == kind][:STATEMENT_LIMIT]]
+    items = [item for kind in VACANCY_KINDS
+             for item in representative([i for i in vacancy_items if i["kind"] == kind], STATEMENT_LIMIT)]
     onet = materials.get("onet") or {}
     items.extend({"kind": "onet_task", "text": task["text"], "importance": task.get("importance"),
                   "date": onet.get("collected_at")} for task in onet.get("tasks", []))
@@ -288,18 +340,28 @@ def statements_of(settings, materials):
 
 
 def trend_of(materials):
-    """Change in the share of HH vacancies per skill between the first and the last sample, and its start date."""
+    """Change in the share of HH vacancies per skill between the first and the last sample, and its start date.
+
+    No trend when the samples span less than TREND_MIN_DAYS.
+    """
     samples = sorted((sample for sample in materials["snapshots"]
                       if sample.get("source", "hh") == "hh" and sample.get("vacancies")),
                      key=lambda sample: sample["collected_at"])
-    if len(samples) < 2:
+    if len(samples) < 2 or (date.fromisoformat(samples[-1]["collected_at"])
+                            - date.fromisoformat(samples[0]["collected_at"])).days < TREND_MIN_DAYS:
         return {}, None
 
     def shares(sample):
-        return {canonical_skill(skill): count / sample["vacancies"] for skill, count in sample["skill_counts"].items()}
+        counts = {}
+        for label, count in sample["skill_counts"].items():
+            skill = canonical_skill(label)
+            if skill:
+                # Older samples may count one skill under several labels («rest», «rest api»); keep the larger.
+                counts[skill] = max(counts.get(skill, 0), count)
+        return {skill: count / sample["vacancies"] for skill, count in counts.items()}
 
     first, last = shares(samples[0]), shares(samples[-1])
-    return {skill: last.get(skill, 0) - first.get(skill, 0) for skill in set(first) | set(last) if skill}, \
+    return {skill: last.get(skill, 0) - first.get(skill, 0) for skill in set(first) | set(last)}, \
         samples[0]["collected_at"]
 
 
@@ -328,10 +390,12 @@ def esco_relations(skill, esco_items):
 
 def skill_table(materials, statements, trends):
     vacancies = materials["vacancies"]
-    holders = {}
+    holders, spellings = {}, {}
     for vacancy in vacancies:
         for skill in {canonical_skill(label) for label in vacancy["skills"]} - {None}:
             holders.setdefault(skill, []).append(vacancy)
+        for skill, label in vacancy.get("skill_labels", {}).items():
+            spellings.setdefault(skill, Counter())[label] += 1
     cases = [item for item in statements if item["kind"] == "case"]
     case_counts = Counter(canonical_skill(skill) for case in cases for skill in case["skills"])
     esco_items = [item for item in statements if item["kind"] == "esco"]
@@ -345,7 +409,8 @@ def skill_table(materials, statements, trends):
         practice = min(1, case_counts[skill] / 2)
         change = trends.get(skill, 0)
         score = significance(share, relation_weight(relations), practice, change)
-        table.append({"skill": skill, "name": display(skill), "share": share, "score": score, "level": level(score),
+        name = DISPLAY.get(skill) or (spellings[skill].most_common(1)[0][0] if skill in spellings else skill)
+        table.append({"skill": skill, "name": name, "share": share, "score": score, "level": level(score),
                       "by_source": Counter(vacancy["source"] for vacancy in found), "trend": trends.get(skill),
                       "esco": relations, "cases": case_counts[skill]})
     table.sort(key=lambda row: (-row["score"], -row["share"], row["name"]))
@@ -467,7 +532,7 @@ def competency_row(competency, statements, skills, materials, context):
 
     return {"title": competency.title, "score": score, "level": level(score), "skills": skill_lines,
             "knowledge": knowledge_lines, "evidence": evidence, "freshness": freshness,
-            "work": work, "knowledge_items": knowledge, "skill_rows": skill_rows}
+            "work": work, "knowledge_items": knowledge, "skill_rows": skill_rows, "vacancies": found}
 
 
 async def summarize(settings, materials, today):
@@ -494,14 +559,15 @@ HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
 WRAP = Alignment(wrap_text=True, vertical="top")
 
 
-def table(sheet, start, headers, widths):
+def table(sheet, start, headers, widths, freeze=True):
     for column, (header, width) in enumerate(zip(headers, widths), 1):
         cell = sheet.cell(row=start, column=column, value=header)
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = HEADER_FILL
         cell.alignment = WRAP
         sheet.column_dimensions[cell.column_letter].width = width
-    sheet.freeze_panes = sheet.cell(row=start + 1, column=1)
+    if freeze:
+        sheet.freeze_panes = sheet.cell(row=start + 1, column=1)
 
 
 def put(sheet, row, values, link=None):
@@ -523,6 +589,162 @@ def score_bars(sheet, column, first, last):
     if last >= first:
         sheet.conditional_formatting.add(f"{column}{first}:{column}{last}", DataBarRule(
             start_type="num", start_value=0, end_type="num", end_value=100, color="5B9BD5"))
+
+
+def graph_layout(rows):
+    """Nodes and edges of the competency graph, in rows from the top.
+
+    The skills only one competency uses stand on the left beside it, competencies in the middle,
+    the skills of several competencies on the right, ordered by the competencies they join.
+    """
+    owners = {}
+    for number, row in enumerate(rows):
+        for skill in row["skill_rows"]:
+            owners.setdefault(skill["skill"], (skill, []))[1].append(number)
+    single, places, slot = [], [], 0
+    for number, row in enumerate(rows):
+        own = [skill for skill in row["skill_rows"] if len(owners[skill["skill"]][1]) == 1]
+        single.extend((skill, number, slot + offset) for offset, skill in enumerate(own))
+        places.append(slot + (max(1, len(own)) - 1) / 2)
+        slot += max(1, len(own)) + 1
+    left = max(slot - 1, 1)
+    shared = sorted((item for item in owners.values() if len(item[1]) > 1),
+                    key=lambda item: (sum(places[number] for number in item[1]) / len(item[1]), item[0]["name"]))
+    height = max(left, len(shared))
+    # A short left side is centred against a longer right one.
+    shift = (height - left) / 2
+    competencies = [{"kind": "competency", "label": f"{number}. {row['title']} — {row['score']}", "x": 1,
+                     "y": places[number - 1] + shift, "size": 10 + round(row["score"] / 10)}
+                    for number, row in enumerate(rows, 1)]
+    nodes = [*competencies]
+    edges = {"single": [], "shared": []}
+    for skill, number, place in single:
+        nodes.append({"kind": "single", "label": skill["name"], "x": 0, "y": place + shift,
+                      "size": 5 + round(skill["score"] / 12)})
+        edges["single"].append((nodes[-1], competencies[number]))
+    step = height / len(shared) if shared else 0
+    for index, (skill, numbers) in enumerate(shared):
+        nodes.append({"kind": "shared", "label": f"{skill['name']} ({len(numbers)})", "x": 2,
+                      "y": (index + 0.5) * step - 0.5, "size": 5 + round(skill["score"] / 12)})
+        edges["shared"].extend((competencies[number], nodes[-1]) for number in numbers)
+    return {"nodes": nodes, "edges": edges, "height": height, "shared": len(shared), "skills": len(owners)}
+
+
+def overlaps(rows):
+    """Pairs of competencies with shared skills or vacancies, the most shared skills first."""
+    pairs = []
+    for (first_number, first), (second_number, second) in combinations(enumerate(rows, 1), 2):
+        skills = [skill["name"] for skill in first["skill_rows"]
+                  if any(other["skill"] == skill["skill"] for other in second["skill_rows"])]
+        vacancies = len(first["vacancies"] & second["vacancies"])
+        if skills or vacancies:
+            smaller = min(len(first["vacancies"]), len(second["vacancies"]))
+            pairs.append({"first": f"{first_number}. {first['title']}", "second": f"{second_number}. {second['title']}",
+                          "skills": skills, "vacancies": vacancies, "share": vacancies / smaller if smaller else 0})
+    return sorted(pairs, key=lambda pair: (-len(pair["skills"]), -pair["vacancies"], pair["first"], pair["second"]))
+
+
+def label_text(size, color, bold=False):
+    font = CharacterProperties(sz=size * 100, b=bold, solidFill=color)
+    return RichText(p=[Paragraph(pPr=ParagraphProperties(defRPr=font), endParaRPr=font)])
+
+
+def edge_series(data, column, pairs, color):
+    """One line series for all edges: two points per edge and a blank row that breaks the line."""
+    for index, (start, end) in enumerate(pairs):
+        for offset, node in enumerate((start, end)):
+            data.cell(row=2 + 3 * index + offset, column=column, value=node["x"])
+            data.cell(row=2 + 3 * index + offset, column=column + 1, value=-node["y"])
+    last = 1 + 3 * len(pairs)
+    series = Series(Reference(data, min_col=column + 1, min_row=2, max_row=last),
+                    Reference(data, min_col=column, min_row=2, max_row=last), title="связи")
+    series.marker = Marker(symbol="none")
+    series.smooth = False
+    series.graphicalProperties = GraphicalProperties(ln=LineProperties(solidFill=color, w=12700))
+    return series
+
+
+def node_series(data, row, node):
+    data.cell(row=row, column=1, value=node["label"])
+    data.cell(row=row, column=2, value=node["x"])
+    data.cell(row=row, column=3, value=-node["y"])
+    series = Series(Reference(data, min_col=3, min_row=row), Reference(data, min_col=2, min_row=row),
+                    title=node["label"])
+    series.marker = Marker(symbol="square" if node["kind"] == "competency" else "circle", size=node["size"])
+    series.marker.graphicalProperties = GraphicalProperties(
+        solidFill=GRAPH_COLORS[node["kind"]], ln=LineProperties(solidFill="FFFFFF", w=19050))
+    series.graphicalProperties = GraphicalProperties(ln=LineProperties(noFill=True))
+    position = {"competency": "t", "single": "l", "shared": "r"}[node["kind"]]
+    series.dLbls = DataLabelList(dLblPos=position, showSerName=True, showVal=False, showCatName=False,
+                                 showLegendKey=False, showPercent=False, showBubbleSize=False,
+                                 txPr=label_text(9 if node["kind"] == "competency" else 8,
+                                                 GRAPH_COLORS["muted" if node["kind"] == "single" else "ink"],
+                                                 bold=node["kind"] != "single"))
+    return series
+
+
+def write_graph(book, summary):
+    """A sheet with the competency–skill graph and the table of competencies that overlap."""
+    rows = summary["rows"]
+    layout = graph_layout(rows)
+    sheet = book.create_sheet("Граф пересечений", 2)
+    sheet["A1"] = f"{summary['materials']['profession']['title']}: пересечения компетенций и навыков"
+    sheet["A1"].font = Font(bold=True, size=14)
+    sheet["A2"] = ("Квадраты в центре — компетенции (номер как на листе «Сводка», значимость). Слева — навыки только "
+                   "этой компетенции, справа — навыки нескольких компетенций, в скобках — сколько их. "
+                   "Размер точки — значимость навыка.")
+    unlinked = len(summary["skills"]) - layout["skills"]
+    sheet["A3"] = (f"Общих навыков: {layout['shared']} из {layout['skills']}" if layout["shared"]
+                   else "Общих навыков у компетенций нет: у каждой свои.") + (
+        f" · Навыков без компетенции: {unlinked}, на графе их нет." if unlinked else "")
+    for cell in ("A2", "A3"):
+        sheet[cell].alignment = Alignment(wrap_text=False)
+
+    # Numbers drops a chart whose data sheet has a Cyrillic name.
+    data = book.create_sheet("graph_data")
+    data.sheet_state = "hidden"
+    data.append(["Узел", "x", "y", "", "x", "y", "", "x", "y"])
+    chart = ScatterChart(scatterStyle="lineMarker")
+    chart.legend = None
+    for column, kind in ((5, "single"), (8, "shared")):
+        if layout["edges"][kind]:
+            chart.series.append(edge_series(data, column, layout["edges"][kind], GRAPH_COLORS[f"{kind}_edge"]))
+    chart.series.extend(node_series(data, row, node) for row, node in enumerate(layout["nodes"], 2))
+    # Invisible corners leave room for the labels in apps that ignore the axis limits, such as Numbers.
+    for row, (x, y) in enumerate(((-0.6, 1), (2.6, -layout["height"] - 0.2)), 2):
+        data.cell(row=row, column=11, value=x)
+        data.cell(row=row, column=12, value=y)
+    corners = Series(Reference(data, min_col=12, min_row=2, max_row=3), Reference(data, min_col=11, min_row=2, max_row=3),
+                     title="поля")
+    corners.marker = Marker(symbol="none")
+    corners.graphicalProperties = GraphicalProperties(ln=LineProperties(noFill=True))
+    chart.series.append(corners)
+    for axis in (chart.x_axis, chart.y_axis):
+        axis.delete = True
+        axis.majorGridlines = None
+        axis.tickLblPos = "none"
+        axis.number_format = ";;;"
+    chart.x_axis.scaling.min, chart.x_axis.scaling.max = -0.6, 2.6
+    chart.y_axis.scaling.min, chart.y_axis.scaling.max = -layout["height"] - 0.2, 1
+    chart.x_axis.majorUnit = 1
+    chart.width = 30
+    chart.height = max(9, GRAPH_ROW_CM * (layout["height"] + 3))
+    sheet.add_chart(chart, "A5")
+
+    # Rows are 15 pt (0.53 cm) high by default; Numbers draws them lower, so the table leaves a margin.
+    start = 5 + math.ceil(chart.height / 0.45) + 2
+    pairs = overlaps(rows)
+    sheet.cell(row=start, column=1, value="Пересечения компетенций" if pairs
+               else "Пересечений нет: у компетенций нет общих навыков и вакансий.").font = Font(bold=True, size=12)
+    if pairs:
+        table(sheet, start + 1, ["Компетенция", "Компетенция", "Общие навыки", "Общих вакансий", "От меньшей"],
+              [40, 40, 40, 14, 12], freeze=False)
+        for number, pair in enumerate(pairs, start + 2):
+            put(sheet, number, [pair["first"], pair["second"], ", ".join(pair["skills"]) or "—", pair["vacancies"],
+                                round(pair["share"], 3)])
+            sheet.cell(row=number, column=5).number_format = "0%"
+        sheet.cell(row=start + len(pairs) + 3, column=1,
+                   value="«От меньшей» — доля общих вакансий среди вакансий меньшей из двух компетенций.")
 
 
 def evidence_rows(row, vacancies):
@@ -649,6 +871,8 @@ def write_workbook(summary, path):
         "Числа, цитаты, ссылки, даты и баллы посчитаны по собранным данным.",
         "Похожие формулировки вакансий объединены эмбеддингами." if summary["merged"]
         else "Эмбеддинги недоступны: объединены только одинаковые формулировки.",
+        "Тренд спроса посчитан по первой и последней выборке HH." if summary["trend_since"]
+        else f"Тренд не считался: нужны две выборки HH с разницей не меньше {TREND_MIN_DAYS} дней.",
         f"Не отнесено ни к одной компетенции: {len(summary['unassigned'])} формулировок из {len(summary['statements'])}.",
     ]
     if materials.get("period"):
@@ -665,6 +889,7 @@ def write_workbook(summary, path):
     if materials.get("demo"):
         cell = about.cell(row=start + len(notes) + 1, column=1, value="ДЕМО-ДАННЫЕ: " + materials.get("note", ""))
         cell.font = Font(bold=True, color="C00000")
+    write_graph(book, summary)
     book.save(path)
 
 
@@ -680,8 +905,8 @@ async def build_summary(sessions, settings, profession_id, materials_path=None, 
             raise ValueError(f"The file describes {materials['profession']['id']}, not {profession_id}")
     else:
         materials = await asyncio.to_thread(read_database, sessions, profession_id)
-    # Grouping all statements is one longer request than an interview step.
-    settings = settings.model_copy(update={"llm_timeout_seconds": max(settings.llm_timeout_seconds, 120)})
+    # Grouping all statements is one longer request than an interview step: about a minute for 50 vacancies.
+    settings = settings.model_copy(update={"llm_timeout_seconds": max(settings.llm_timeout_seconds, 180)})
     return await summarize(settings, for_period(materials, since, until), today or date.today())
 
 

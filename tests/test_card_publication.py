@@ -143,11 +143,15 @@ def test_fact_evidence_requires_current_consent_and_follows_edit_lineage(publica
     assert changed["derived_from_fact_id"] == "supported" and changed["supporting_message_ids"] == []
     revised = assert_ok(owner.get(evidence(changed["id"])))
     assert revised["original_text"] == quote and revised["skills"] == [] and revised["turns"] == proof["turns"]
-    assert_ok(change(owner, card_path + "/submit-review", 2, consent=True, show_author=False, share_evidence=True))
+    submitted = assert_ok(change(owner, card_path + "/submit-review", 2, consent=True, show_author=False))
+    assert submitted["consent"]["share_evidence"] is True
     assert editor.get(evidence("supported")).status_code == 404  # Only the current fact is addressable.
     response = editor.get(evidence(changed["id"]))
     assert response.headers["cache-control"] == "no-store"
-    assert assert_ok(response)["turns"][0]["answer_id"] is None
+    editor_proof = assert_ok(response)
+    assert editor_proof["original_text"] == quote
+    assert editor_proof["turns"] == [{**proof["turns"][0], "question_id": None, "answer_id": None}]
+    assert reader.get(evidence(changed["id"])).status_code == 404
     assert_ok(change(editor, card_path + "/review", 3, decision="accept"))
     visible = assert_ok(guest.get(f"/api/v1/catalog/{card_id}"))
     assert visible["content"]["verification"] == [{"text": changed["text"]}]
@@ -178,7 +182,8 @@ def test_publication_full_cycle(publication):
     assert owner.post(submit, headers={"Origin": ORIGIN},
                       json={"expected_version": 1, "consent": True, "show_author": False}).status_code == 422
 
-    initial = assert_ok(change(owner, submit, 1, consent=True, show_author=False))
+    initial = assert_ok(change(owner, submit, 1, consent=True, show_author=False, share_evidence=False))
+    assert initial["consent"]["share_evidence"] is True
     assert initial["content_version"] == 1
     assert [card["id"] for card in editor.get(queue).json()["items"]] == [card_id]
     assert editor.get(f"/api/v1/cards/{private_id}").status_code == 404

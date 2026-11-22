@@ -73,6 +73,7 @@ class SubmitCard(VersionedRequest):
     consent: StrictBool
     show_author: StrictBool
     author_name: AuthorName | None = None
+    # Preserve request compatibility and idempotency for older clients.
     share_evidence: StrictBool = Field(default=False, exclude_if=lambda value: not value)
 
     @model_validator(mode="after")
@@ -479,7 +480,7 @@ def submit_card(request: Request, actor: Actor, key: CommandKey, card_id: Identi
         card.first_submitted_at = card.first_submitted_at or stamp
         card.publication_status, card.review_status = "in_review", "unreviewed"
         card.consent = decision_metadata(card, actor, stamp, show_author=card.show_author,
-                                         author_name=card.author_name, share_evidence=body.share_evidence)
+                                         author_name=card.author_name, share_evidence=True)
         card.review = None
         return "submit_review", card.consent
 

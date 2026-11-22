@@ -56,7 +56,7 @@ export function EditorData({ view, onSessionExpired }: { view: DataView; onSessi
       <a href="#/data/vacancies" aria-current={view === 'vacancies' ? 'page' : undefined}>Вакансии</a>
       <a href="#/data/sources" aria-current={view === 'sources' ? 'page' : undefined}>Источники</a>
     </nav>
-    {profession && <ProfessionCollection key={profession} profession={profession}
+    {profession && <ProfessionCollection key={profession} profession={profession} showSourceDetails={view === 'sources'}
       onSessionExpired={onSessionExpired} onCompleted={refreshMaterials}/>}
     <div hidden={view !== 'vacancies'}>
       <Vacancies key={profession} profile={profession} collectionRefresh={collectionRefresh}

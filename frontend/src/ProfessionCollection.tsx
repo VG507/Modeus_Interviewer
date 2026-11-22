@@ -198,8 +198,8 @@ function EscoPanel({ esco, path, busy, onCollect, onSaved, onSessionExpired }: {
   </section>;
 }
 
-export function ProfessionCollection({ profession, onSessionExpired, onCompleted }: {
-  profession: string; onSessionExpired: () => void; onCompleted: () => void;
+export function ProfessionCollection({ profession, showSourceDetails, onSessionExpired, onCompleted }: {
+  profession: string; showSourceDetails: boolean; onSessionExpired: () => void; onCompleted: () => void;
 }) {
   const [run, setRun] = useState<Run | null>(null);
   const [quality, setQuality] = useState<Quality | null>(null);
@@ -283,7 +283,7 @@ export function ProfessionCollection({ profession, onSessionExpired, onCompleted
     </div>
     {startError && <p role="alert">{startError}</p>}
     {loadError && <p role="alert">{loadError}</p>}
-    {run && <ul aria-label="Результаты сбора">
+    {showSourceDetails && run && <ul aria-label="Результаты сбора">
       {(Object.keys(sources) as Source[]).map(source => {
         const step = run.steps[source];
         if (!step) return null;
@@ -308,12 +308,16 @@ export function ProfessionCollection({ profession, onSessionExpired, onCompleted
         </li>;
       })}
     </ul>}
-    {quality?.esco && <EscoPanel esco={quality.esco} path={path + '/esco'} busy={starting || !!run?.running}
-      onCollect={() => void start(undefined, true)} onSaved={() => setQualityRevision(value => value + 1)}
-      onSessionExpired={onSessionExpired}/>}
-    <h2>Качество материалов</h2>
-    {quality && <QualitySummary quality={quality}/>}
-    <p className="meta">Для интервью проверяются цитата, задача и применимость материала. Популярность
-      в GitHub Trends и Hacker News используется для поиска кандидатов.</p>
+    {quality?.esco && <div hidden={!showSourceDetails}>
+      <EscoPanel esco={quality.esco} path={path + '/esco'} busy={starting || !!run?.running}
+        onCollect={() => void start(undefined, true)} onSaved={() => setQualityRevision(value => value + 1)}
+        onSessionExpired={onSessionExpired}/>
+    </div>}
+    {showSourceDetails && <>
+      <h2>Качество материалов</h2>
+      {quality && <QualitySummary quality={quality}/>}
+      <p className="meta">Для интервью проверяются цитата, задача и применимость материала. Популярность
+        в GitHub Trends и Hacker News используется для поиска кандидатов.</p>
+    </>}
   </div>;
 }

@@ -315,7 +315,6 @@ export function CardScreen({ id, user, onSessionExpired }: SessionProps & { id: 
   const [showAuthor, setShowAuthor] = useState(false);
   const [author, setAuthor] = useState('');
   const [consent, setConsent] = useState(false);
-  const [shareEvidence, setShareEvidence] = useState(false);
   const [factEdit, setFactEdit] = useState<CardFact & { originalText: string }>();
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
@@ -333,7 +332,6 @@ export function CardScreen({ id, user, onSessionExpired }: SessionProps & { id: 
     setShowAuthor(data.show_author);
     setAuthor(data.author_name ?? '');
     setConsent(false);
-    setShareEvidence(false);
     setFactEdit(undefined);
     setComment('');
     setConflict(false);
@@ -397,8 +395,7 @@ export function CardScreen({ id, user, onSessionExpired }: SessionProps & { id: 
   function submit(event: FormEvent) {
     event.preventDefault();
     if (card?.review_blocker || dirty) return;
-    void action('/submit-review', { consent, show_author: showAuthor, author_name: showAuthor ? author : null,
-      share_evidence: shareEvidence },
+    void action('/submit-review', { consent, show_author: showAuthor, author_name: showAuthor ? author : null },
       'Карточка отправлена редактору.');
   }
 
@@ -462,8 +459,6 @@ export function CardScreen({ id, user, onSessionExpired }: SessionProps & { id: 
         <fieldset disabled={disabled || dirty}>
           <label className="check"><input type="checkbox" checked={consent}
             onChange={event => setConsent(event.target.checked)} required/> Согласен на публикацию этой версии после проверки редактором</label>
-          <label className="check"><input type="checkbox" checked={shareEvidence}
-            onChange={event => setShareEvidence(event.target.checked)}/> Показать редактору вопросы, источники и исходные цитаты к фактам этой версии</label>
           <label className="check"><input type="checkbox" checked={showAuthor}
             onChange={event => setShowAuthor(event.target.checked)}/> Указать имя автора в каталоге</label>
           {showAuthor && <>

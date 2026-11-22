@@ -4,7 +4,7 @@ import { DocumentationReview, DocumentationSettings } from './Documentation';
 
 const searchProviders = { github: 'GitHub Issues', trends: 'GitHub Trends' } as const;
 const providers = { ...searchProviders, docs: 'Официальная документация', openalex: 'Научные статьи', skills: 'Agent Skills' } as const;
-type Provider = keyof typeof providers;
+export type Provider = keyof typeof providers;
 const statuses: Record<string, string> = {
   new: 'Новый', review: 'На проверке', accepted: 'Допущен к интервью', observe: 'Наблюдаем',
   automatic_check: 'Ожидает автопроверки', rejected: 'Отклонён', expired: 'Срок проверки истёк', unavailable: 'Источник недоступен',
@@ -126,10 +126,11 @@ function Detail({ item }: { item: ItemDetail }) {
   </div>;
 }
 
-export function Discovery({ profession, collectionRefresh, onSessionExpired }: {
-  profession: string; collectionRefresh: number; onSessionExpired: () => void;
+export function Discovery({ profession, provider: fixedProvider, collectionRefresh, onSessionExpired }: {
+  profession: string; provider?: Provider; collectionRefresh: number; onSessionExpired: () => void;
 }) {
-  const [provider, setProvider] = useState<Provider | ''>('');
+  const [filter, setFilter] = useState<Provider | ''>('');
+  const provider = fixedProvider ?? filter;
   const [offset, setOffset] = useState(0);
   const [page, setPage] = useState<ItemPage | null>(null);
   const [selected, setSelected] = useState('');
@@ -137,7 +138,8 @@ export function Discovery({ profession, collectionRefresh, onSessionExpired }: {
   const [error, setError] = useState('');
   const [detailError, setDetailError] = useState('');
   const [reload, setReload] = useState(0);
-  const [collectionSource, setCollectionSource] = useState<keyof typeof searchProviders>('github');
+  const [collectionSource, setCollectionSource] = useState<keyof typeof searchProviders>(
+    fixedProvider === 'trends' ? 'trends' : 'github');
   const [collectionResult, setCollectionResult] = useState('');
   const [collectionError, setCollectionError] = useState('');
   const [collecting, setCollecting] = useState(false);
@@ -211,7 +213,7 @@ export function Discovery({ profession, collectionRefresh, onSessionExpired }: {
       setCollectionResult(result.collected ? `Сохранено или обновлено записей: ${result.collected}.${result.partial ?
         ' Поиск обработал ограниченную часть выдачи.' : ''}` : result.partial ?
         'В просмотренной части выдачи совпадений нет.' : 'По этим условиям совпадений нет.');
-      setProvider(collectionSource); showPage(0); setReload(value => value + 1);
+      setFilter(collectionSource); showPage(0); setReload(value => value + 1);
     } catch (problem) {
       if (request.signal.aborted) return;
       if (problem instanceof ApiError && problem.status === 401) onSessionExpired();
@@ -224,22 +226,24 @@ export function Discovery({ profession, collectionRefresh, onSessionExpired }: {
 
   return <section className="stack">
     <div className="panel vacancy-filters">
-      <label>Источник <select value={provider} onChange={event => {
-        showPage(0); setProvider(event.target.value as Provider | '');
+      {!fixedProvider && <label>Источник <select value={provider} onChange={event => {
+        showPage(0); setFilter(event.target.value as Provider | '');
       }}>
         <option value="">Все источники</option>
         {Object.entries(providers).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-      </select></label>
+      </select></label>}
       <button onClick={() => { showPage(0); setReload(value => value + 1); }}>Обновить</button>
     </div>
+    {(!fixedProvider || fixedProvider === 'github' || fixedProvider === 'trends') &&
     <form className="panel" onSubmit={collectForProfession}>
-      <h2>Поиск в GitHub</h2>
+      <h2>{fixedProvider === 'trends' ? 'Сбор GitHub Trends' : fixedProvider === 'github' ?
+        'Сбор GitHub Issues' : 'Поиск в GitHub'}</h2>
       <fieldset className="vacancy-filters" disabled={collecting || !profession}>
-        <label>Сборщик <select value={collectionSource} onChange={event => {
+        {!fixedProvider && <label>Сборщик <select value={collectionSource} onChange={event => {
           setCollectionSource(event.target.value as keyof typeof searchProviders); setCollectionResult(''); setCollectionError('');
         }}>
           {Object.entries(searchProviders).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-        </select></label>
+        </select></label>}
         <label key={collectionSource}>{searchFields[collectionSource].label}
           <input name="values" required maxLength={700} placeholder={searchFields[collectionSource].example}/>
         </label>
@@ -251,12 +255,12 @@ export function Discovery({ profession, collectionRefresh, onSessionExpired }: {
       {collecting && <p role="status">Дождитесь результата. При ошибке сохранённая подборка останется доступной.</p>}
       {collectionError && <p role="alert">{collectionError}</p>}
       {collectionResult && <p role="status">{collectionResult}</p>}
-    </form>
-    <details className="panel">
+    </form>}
+    {(!fixedProvider || fixedProvider === 'docs') && <details className="panel">
       <summary>Мониторинг официальной документации</summary>
       <DocumentationSettings key={profession} profession={profession} refresh={reload} onSessionExpired={onSessionExpired}
-        onCollected={() => { setProvider('docs'); showPage(0); setReload(value => value + 1); }}/>
-    </details>
+        onCollected={() => { setFilter('docs'); showPage(0); setReload(value => value + 1); }}/>
+    </details>}
     {error && <p role="alert">{error}</p>}
     {!error && !page && <p role="status">Загружаем материалы…</p>}
     {page && !page.items.length && <p>По выбранным фильтрам материалов пока нет.</p>}

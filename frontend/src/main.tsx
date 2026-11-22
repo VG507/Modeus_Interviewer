@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { api, ApiError, command, describe } from './api';
 import { InterviewHome } from './InterviewHome';
 import { InterviewScreen } from './InterviewScreen';
-import { EditorData, type DataView } from './EditorData';
+import { EditorData } from './EditorData';
 import { CardsList, CardScreen, CatalogCard } from './Cards';
 import { Themes } from './Themes';
 import { ThemeToggle } from './ThemeToggle';
@@ -21,8 +21,8 @@ function App() {
   const cardId = route.match(/^#\/cards\/([a-zA-Z0-9_-]+)$/)?.[1];
   const themesView = route === '#/catalog/themes';
   const catalogId = themesView ? undefined : route.match(/^#\/catalog\/([a-zA-Z0-9_-]+)$/)?.[1];
-  const dataView: DataView | null = route === '#/data/sources' || route === '#/discovery' ? 'sources' :
-    route === '#/data' || route === '#/data/vacancies' || route === '#/vacancies' ? 'vacancies' : null;
+  const dataView = route === '#/data' || route === '#/data/vacancies' || route === '#/data/sources' ||
+    route === '#/vacancies' || route === '#/discovery';
   const lock = useRef(false);
 
   useEffect(() => {
@@ -74,7 +74,7 @@ function App() {
 
   return <main>
     <header className="masthead">
-      <span className="brand">modeus</span>
+      <span className="brand">Modeus</span>
       <nav className="actions" aria-label="Разделы Modeus">
         <a href="#">Интервью</a>
         <a href="#/catalog">Каталог</a>
@@ -104,7 +104,7 @@ function App() {
       </form> : cardId ? <CardScreen key={cardId} id={cardId} user={user} onSessionExpired={expireSession}/> :
       route === '#/cards' ? <CardsList key="own" scope="own" onSessionExpired={expireSession}/> :
       dataView ?
-        user.is_editor ? <EditorData view={dataView} onSessionExpired={expireSession}/> :
+        user.is_editor ? <EditorData onSessionExpired={expireSession}/> :
           <p role="alert">Для этого раздела нужна роль редактора.</p> :
       route === '#/review' || route === '#/review/published' ?
         user.is_editor ? <CardsList key={route} scope={route === '#/review' ? 'review' : 'published'}

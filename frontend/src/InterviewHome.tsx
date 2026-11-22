@@ -10,7 +10,7 @@ const statusLabels = {
 };
 
 const dateFormat = new Intl.DateTimeFormat('ru', { dateStyle: 'medium', timeStyle: 'short' });
-const previewCount = 6;
+const previewCount = 5;
 const projectFields: [keyof ProjectContext, string, string, number][] = [
   ['task', 'Что нужно было сделать в проекте?', 'Например, перенести оплату на нового провайдера', 1000],
   ['period', 'Когда вы над ним работали?', 'Например, с мая по сентябрь 2025', 300],
@@ -73,15 +73,15 @@ function ProfileForm({ profile, catalog, busy, onSave, onCancel }: {
             maxLength={1000} rows={3} placeholder="Например, разрабатываю API и разбираю сбои в оплате" />
         </div>
         <div>
+          <label htmlFor="profile-conditions">Что важно знать о вашей работе?</label>
+          <textarea id="profile-conditions" name="conditions" defaultValue={profile?.conditions} maxLength={1000}
+            rows={3} placeholder="Например, работаю в команде из пяти человек, сервис должен быть доступен круглосуточно" />
+        </div>
+        <div>
           <label htmlFor="profile-tone">Как интервьюеру с вами говорить?</label>
           <select id="profile-tone" name="tone" defaultValue={profile?.tone ?? 'friendly'}>
             {Object.entries(tones).map(([value, title]) => <option key={value} value={value}>{title}</option>)}
           </select>
-        </div>
-        <div>
-          <label htmlFor="profile-conditions">Что важно знать о вашей работе?</label>
-          <textarea id="profile-conditions" name="conditions" defaultValue={profile?.conditions} maxLength={1000}
-            rows={3} placeholder="Например, работаю в команде из пяти человек, сервис должен быть доступен круглосуточно" />
         </div>
       </div>
       <details className="interview-projects" open={projects.length ? true : undefined}>

@@ -1,20 +1,32 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, describe } from './api';
-import { Discovery } from './Discovery';
-import { OnetTasks } from './OnetTasks';
-import { ProfessionCollection } from './ProfessionCollection';
+import { Discovery, type Provider } from './Discovery';
+import { CollectionOverview, EscoPanel, useCollectionStatus } from './ProfessionCollection';
 import { Vacancies } from './Vacancies';
 
 type Profile = { id: string; title: string };
-export type DataView = 'vacancies' | 'sources';
+type DataTab = 'overview' | 'vacancies' | 'esco' | Provider;
+const tabs: [DataTab, string][] = [
+  ['overview', 'Обзор'],
+  ['vacancies', 'Вакансии'],
+  ['esco', 'ESCO'],
+  ['github', 'GitHub Issues'],
+  ['trends', 'GitHub Trends'],
+  ['docs', 'Документация'],
+  ['openalex', 'Научные статьи'],
+  ['skills', 'Agent Skills'],
+];
+const discoveryTabs: readonly DataTab[] = ['github', 'trends', 'docs', 'openalex', 'skills'];
 
-export function EditorData({ view, onSessionExpired }: { view: DataView; onSessionExpired: () => void }) {
+export function EditorData({ onSessionExpired }: { onSessionExpired: () => void }) {
   const [profiles, setProfiles] = useState<Profile[] | null>(null);
   const [profession, setProfession] = useState('');
+  const [tab, setTab] = useState<DataTab>('overview');
   const [loadError, setLoadError] = useState('');
   const [reload, setReload] = useState(0);
   const [collectionRefresh, setCollectionRefresh] = useState(0);
   const refreshMaterials = useCallback(() => setCollectionRefresh(value => value + 1), []);
+  const collection = useCollectionStatus(profession, onSessionExpired, refreshMaterials);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -52,22 +64,25 @@ export function EditorData({ view, onSessionExpired }: { view: DataView; onSessi
         <button type="button" className="secondary" onClick={() => setReload(value => value + 1)}>Повторить загрузку</button>
       </>}
     </div>
-    <nav className="actions data-nav" aria-label="Данные по профессии">
-      <a href="#/data/vacancies" aria-current={view === 'vacancies' ? 'page' : undefined}>Вакансии</a>
-      <a href="#/data/sources" aria-current={view === 'sources' ? 'page' : undefined}>Источники</a>
-    </nav>
-    {profession && <ProfessionCollection key={profession} profession={profession}
-      onSessionExpired={onSessionExpired} onCompleted={refreshMaterials}/>}
-    <div hidden={view !== 'vacancies'}>
-      <Vacancies key={profession} profile={profession} collectionRefresh={collectionRefresh}
-        onProfileSaved={profileSaved} onSessionExpired={onSessionExpired}/>
-    </div>
-    <div hidden={view !== 'sources'}>
-      {view === 'sources' && profession && <OnetTasks key={profession} profession={profession}
-        onSessionExpired={onSessionExpired}/>}
-      {profession ? <Discovery key={profession} profession={profession} collectionRefresh={collectionRefresh}
-        onSessionExpired={onSessionExpired}/> : profiles &&
-        <p>Добавьте профессию на вкладке «Вакансии», чтобы собирать источники.</p>}
-    </div>
+    {profession && <div className="data-layout">
+      <nav className="panel source-menu" aria-label="Источники данных">
+        {tabs.map(([id, label]) => <button key={id} type="button" className="quiet"
+          aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}>{label}</button>)}
+      </nav>
+      <div className="stack">
+        {tab === 'overview' && <CollectionOverview status={collection}/>}
+        {tab === 'vacancies' && <Vacancies key={profession} profile={profession}
+          collectionRefresh={collectionRefresh} onProfileSaved={profileSaved} onSessionExpired={onSessionExpired}/>}
+        {tab === 'esco' && (collection.quality?.esco ? <div className="panel">
+            <EscoPanel esco={collection.quality.esco}
+              path={'/discovery/collection/' + encodeURIComponent(profession) + '/esco'}
+              busy={collection.starting || !!collection.run?.running}
+              onCollect={() => void collection.start(undefined, true)} onSaved={collection.refreshQuality}
+              onSessionExpired={onSessionExpired}/>
+          </div> : <p role="status">Загружаем настройки ESCO…</p>)}
+        {discoveryTabs.includes(tab) && <Discovery key={`${profession}:${tab}`} profession={profession}
+          provider={tab as Provider} collectionRefresh={collectionRefresh} onSessionExpired={onSessionExpired}/>}
+      </div>
+    </div>}
   </section>;
 }

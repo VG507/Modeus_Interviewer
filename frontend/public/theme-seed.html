@@ -1,0 +1,8 @@
+<!doctype html>
+<meta charset="utf-8">
+<script>
+  var theme = new URLSearchParams(location.search).get('theme') || 'light';
+  localStorage.setItem('modeus-theme', theme);
+  document.title = 'seeded:' + theme;
+</script>
+seeded

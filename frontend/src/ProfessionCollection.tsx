@@ -76,38 +76,28 @@ const messages: Record<string, string> = {
 };
 const retryable = new Set(['partial', 'failed', 'busy', 'interrupted']);
 
-function VacancySample({ label, sample }: { label: string; sample: VacancyQuality }) {
-  const date = sample.checked_at && new Date(sample.checked_at).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' });
-  return <li><a href="#/data/vacancies">{label}</a>{date ? <>
-    {' · выборка от '}{date} · {sample.vacancies} вакансий, {sample.employers} работодателей
-    {' · '}{sample.fresh ? 'свежая' : 'срок актуальности истёк'}
-    {!(sample.approved && sample.current_config) && ' · профиль или выборка требуют проверки'}
-    {sample.source === 'file' && ' · импорт из файла'}
-  </> : ' · выборки пока нет'}</li>;
+function qualityNote(source: Source, quality: Quality | null): string {
+  if (!quality) return '';
+  if (source === 'hh' || source === 'trudvsem') {
+    const sample = source === 'hh' ? quality.hh : quality.trudvsem;
+    if (!sample) return '';
+    if (!sample.checked_at) return 'выборки пока нет';
+    const date = new Date(sample.checked_at).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' });
+    return `выборка от ${date} · вакансий: ${sample.vacancies}${sample.fresh ? '' : ' · требует обновления'}`;
+  }
+  if (source === 'esco') return quality.esco?.sample ? `навыков: ${quality.esco.sample.skills}` : '';
+  const counters = source === 'openalex' ? quality.materials.openalex
+    : source === 'skills' ? quality.materials.skills
+    : source === 'hn' ? undefined : quality.materials[source];
+  if (!counters) return '';
+  if (source === 'github') return `допущено ${counters.accepted ?? 0} · ожидают проверки ${counters.automatic_check ?? 0}`;
+  if (source === 'docs') return `допущено ${counters.accepted ?? 0} · ожидают рассмотрения ${(counters.new ?? 0) + (counters.review ?? 0)}`;
+  if (source === 'trends') return `сигналов популярности: ${counters.observe ?? 0}`;
+  if (source === 'openalex') return `допущено ${counters.accepted ?? 0} · кандидаты ${(counters.new ?? 0) + (counters.observe ?? 0)}`;
+  return `допущено ${counters.accepted ?? 0} · наблюдение ${(counters.new ?? 0) + (counters.observe ?? 0)}`;
 }
 
-function QualitySummary({ quality }: { quality: Quality }) {
-  const { hh, trudvsem, materials } = quality;
-  const { github, docs, trends, openalex: research, skills } = materials;
-  return <ul>
-    <VacancySample label="Вакансии HH" sample={hh}/>
-    {trudvsem && <VacancySample label="Работа России" sample={trudvsem}/>}
-    <li>GitHub Issues · допущено {github.accepted ?? 0} · ожидают автопроверки {github.automatic_check ?? 0}
-      {(github.automatic_check ?? 0) > 0 && !quality.automatic_check_enabled && ' · модель не настроена'}
-      {' · наблюдение, отклонено или просрочено '}
-      {(github.observe ?? 0) + (github.rejected ?? 0) + (github.expired ?? 0)}</li>
-    <li>Документация · допущено {docs.accepted ?? 0} · ожидают рассмотрения {(docs.new ?? 0) + (docs.review ?? 0)}
-      {' · наблюдение, отклонено, недоступно или просрочено '}
-      {(docs.observe ?? 0) + (docs.rejected ?? 0) + (docs.unavailable ?? 0) + (docs.expired ?? 0)}</li>
-    <li>GitHub Trends · {trends.observe ?? 0} сигналов популярности. Hacker News · кандидаты по технологиям и активности обсуждения.</li>
-    {research && <li>Научные статьи · допущено {research.accepted ?? 0} · кандидаты {(research.new ?? 0) + (research.observe ?? 0)}
-      {' · отклонено или просрочено '}{(research.rejected ?? 0) + (research.expired ?? 0)}</li>}
-    {skills && <li>Agent Skills · допущено {skills.accepted ?? 0} · наблюдение {(skills.new ?? 0) + (skills.observe ?? 0)}
-      {' · отклонено или устарело '}{(skills.rejected ?? 0) + (skills.expired ?? 0)}</li>}
-  </ul>;
-}
-
-function EscoPanel({ esco, path, busy, onCollect, onSaved, onSessionExpired }: {
+export function EscoPanel({ esco, path, busy, onCollect, onSaved, onSessionExpired }: {
   esco: EscoQuality; path: string; busy: boolean; onCollect: () => void;
   onSaved: () => void; onSessionExpired: () => void;
 }) {
@@ -198,9 +188,7 @@ function EscoPanel({ esco, path, busy, onCollect, onSaved, onSessionExpired }: {
   </section>;
 }
 
-export function ProfessionCollection({ profession, onSessionExpired, onCompleted }: {
-  profession: string; onSessionExpired: () => void; onCompleted: () => void;
-}) {
+export function useCollectionStatus(profession: string, onSessionExpired: () => void, onCompleted: () => void) {
   const [run, setRun] = useState<Run | null>(null);
   const [quality, setQuality] = useState<Quality | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -214,7 +202,7 @@ export function ProfessionCollection({ profession, onSessionExpired, onCompleted
   useEffect(() => () => request.current?.abort(), []);
 
   useEffect(() => {
-    if (starting) return;
+    if (starting || !profession) return;
     const controller = new AbortController();
     const { signal } = controller;
     let timer: number | undefined;
@@ -275,6 +263,14 @@ export function ProfessionCollection({ profession, onSessionExpired, onCompleted
     }
   }
 
+  return { run, quality, starting, startError, loadError, start,
+    refreshQuality: () => setQualityRevision(value => value + 1) };
+}
+
+export type CollectionStatus = ReturnType<typeof useCollectionStatus>;
+
+export function CollectionOverview({ status }: { status: CollectionStatus }) {
+  const { run, quality, starting, startError, loadError, start } = status;
   return <div className="panel stack">
     <div className="actions">
       <button type="button" disabled={starting || run?.running} onClick={() => void start()}>
@@ -283,23 +279,27 @@ export function ProfessionCollection({ profession, onSessionExpired, onCompleted
     </div>
     {startError && <p role="alert">{startError}</p>}
     {loadError && <p role="alert">{loadError}</p>}
-    {run && <ul aria-label="Результаты сбора">
+    {(run || quality) && <ul className="source-list" aria-label="Состояние источников">
       {(Object.keys(sources) as Source[]).map(source => {
-        const step = run.steps[source];
-        if (!step) return null;
-        return <li key={source}><strong>{sources[source]}</strong> · {statuses[step.status] ?? step.status}
-          {step.found !== undefined && <> · кандидатов {step.found}</>}
-          {step.collected !== undefined && <> · {source === 'openalex' ? 'проверено' :
-            source === 'esco' ? 'навыков' : 'собрано или обновлено'} {step.collected}</>}
-          {step.accepted !== undefined && <> · допущено к интервью {step.accepted}</>}
-          {step.changed !== undefined && <> · новых или изменённых версий {step.changed}</>}
-          {!!step.busy && <> · уже обновляется {step.busy}</>}
-          {step.code && <> · {messages[step.code] ?? step.code}</>}
-          {!run.running && retryable.has(step.status) &&
-            <> <button className="secondary" type="button" disabled={starting}
-              onClick={() => void start(source)}>Повторить {sources[source]}</button></>}
-          {step.errors && Object.entries(step.errors).map(([target, error]) => <p key={target}>{error}</p>)}
-          {!!step.items?.length && <details>
+        const step = run?.steps[source];
+        const note = qualityNote(source, quality);
+        if (!step && !note) return null;
+        return <li key={source}><strong>{sources[source]}</strong>
+          {step && <> · {statuses[step.status] ?? step.status}
+            {step.found !== undefined && <> · кандидатов {step.found}</>}
+            {step.collected !== undefined && <> · {source === 'openalex' ? 'проверено' :
+              source === 'esco' ? 'навыков' : 'собрано'} {step.collected}</>}
+            {step.accepted !== undefined && <> · допущено {step.accepted}</>}
+            {step.changed !== undefined && <> · новых версий {step.changed}</>}
+            {!!step.busy && <> · уже обновляется {step.busy}</>}
+            {step.code && <> · {messages[step.code] ?? step.code}</>}
+          </>}
+          {note && <> · {note}</>}
+          {step && !run?.running && retryable.has(step.status) &&
+            <button className="secondary retry-step" type="button" disabled={starting}
+              onClick={() => void start(source)}>Повторить</button>}
+          {step?.errors && Object.entries(step.errors).map(([target, error]) => <p key={target}>{error}</p>)}
+          {!!step?.items?.length && <details>
             <summary>Кандидаты из последнего сбора</summary>
             <ul>{step.items.map(item => <li key={item.id}>
               <a href={item.url} target="_blank" rel="noreferrer">{item.title}</a> · рейтинг {item.score}
@@ -308,12 +308,5 @@ export function ProfessionCollection({ profession, onSessionExpired, onCompleted
         </li>;
       })}
     </ul>}
-    {quality?.esco && <EscoPanel esco={quality.esco} path={path + '/esco'} busy={starting || !!run?.running}
-      onCollect={() => void start(undefined, true)} onSaved={() => setQualityRevision(value => value + 1)}
-      onSessionExpired={onSessionExpired}/>}
-    <h2>Качество материалов</h2>
-    {quality && <QualitySummary quality={quality}/>}
-    <p className="meta">Для интервью проверяются цитата, задача и применимость материала. Популярность
-      в GitHub Trends и Hacker News используется для поиска кандидатов.</p>
   </div>;
 }

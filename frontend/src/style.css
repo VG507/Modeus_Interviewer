@@ -139,7 +139,7 @@ label span, .interview-projects summary span { color: var(--text-muted); font-si
 }
 .interview-profile-form label { min-height: 1.4em; }
 .interview-profile-form label span { margin-left: 4px; }
-.interview-profile-form input, .interview-profile-form textarea { margin-bottom: 0; }
+.interview-profile-form select, .interview-profile-form textarea { margin-bottom: 0; }
 .interview-projects {
   margin: 20px 0; padding: 14px 16px; border: 1px solid var(--border);
   border-radius: 8px; background: var(--surface-soft);

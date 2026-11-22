@@ -18,19 +18,23 @@ const projectFields: [keyof ProjectContext, string, string, number][] = [
   ['constraints', 'Что усложняло работу?', 'Например, нельзя было останавливать приём платежей', 1000],
 ];
 const emptyProject: ProjectContext = { task: '', period: '', role: '', responsibility: '', stack: '', constraints: '' };
+type Profession = { id: string; title: string };
+type InterviewProfessions = { items: Profession[]; selected_id: string | null };
 
-function ProfileForm({ profile, busy, onSave, onCancel }: {
-  profile: Context | null; busy: boolean; onSave: (context: Context) => void; onCancel: () => void;
+function ProfileForm({ profile, catalog, busy, onSave, onCancel }: {
+  profile: Context | null; catalog: InterviewProfessions; busy: boolean;
+  onSave: (context: Context) => void; onCancel: () => void;
 }) {
   const [projects, setProjects] = useState(profile?.projects ?? []);
   const [error, setError] = useState('');
+  const selectedId = catalog.items.find(item => item.title === profile?.role)?.id ?? catalog.selected_id ?? '';
 
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const read = (field: string) => String(form.get(field) ?? '').trim();
-    const role = read('role');
-    if (!role) return setError('Укажите, кем вы работаете.');
+    const role = catalog.items.find(item => item.id === read('profession'))?.title;
+    if (!role) return setError('Выберите профессию из списка.');
     const filled = projects
       .map(project => ({
         task: project.task.trim(), period: project.period.trim(), role: project.role.trim(),
@@ -47,9 +51,14 @@ function ProfileForm({ profile, busy, onSave, onCancel }: {
     <fieldset disabled={busy}>
       <div className="interview-profile-basics">
         <div>
-          <label htmlFor="profile-role">Кем вы работаете?</label>
-          <input id="profile-role" name="role" defaultValue={profile?.role} required maxLength={200}
-            placeholder="Например, backend-разработчик" />
+          <label htmlFor="profile-role">По какой профессии хотите пройти интервью?</label>
+          <select id="profile-role" name="profession" defaultValue={selectedId} required
+            disabled={!catalog.items.length}>
+            <option value="" disabled>{catalog.items.length ? 'Выберите профессию' : 'Список профессий пуст'}</option>
+            {catalog.items.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
+          </select>
+          {profile && !selectedId && catalog.items.length > 0 &&
+            <p className="meta">В анкете указано «{profile.role}». Выберите подходящую профессию из списка.</p>}
         </div>
         <div>
           <label htmlFor="profile-experience">Как давно вы этим занимаетесь? <span>Необязательно</span></label>
@@ -96,7 +105,7 @@ function ProfileForm({ profile, busy, onSave, onCancel }: {
       </details>
       {error && <p role="alert">{error}</p>}
       <div className="actions">
-        <button>{busy ? 'Сохраняем…' : 'Сохранить анкету'}</button>
+        <button disabled={!catalog.items.length}>{busy ? 'Сохраняем…' : 'Сохранить анкету'}</button>
         {profile && <button type="button" className="quiet" onClick={onCancel}>Отмена</button>}
       </div>
     </fieldset>
@@ -111,6 +120,7 @@ export function InterviewHome({ onOpen, onSessionExpired }: {
   const [actionError, setActionError] = useState('');
   const [attempt, retry] = useState(0);
   const [profile, setProfile] = useState<Context | null>(null);
+  const [catalog, setCatalog] = useState<InterviewProfessions>();
   const [editing, setEditing] = useState(false);
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [busy, setBusy] = useState<'create' | 'more' | 'save'>();
@@ -121,11 +131,16 @@ export function InterviewHome({ onOpen, onSessionExpired }: {
     const controller = new AbortController();
     setLoadError('');
     const options = { signal: controller.signal };
-    Promise.all([api<Page<Interview>>('/interviews', options), api<Context | null>('/interview-profile', options)])
-      .then(([interviews, savedProfile]) => {
+    Promise.all([
+      api<Page<Interview>>('/interviews', options),
+      api<Context | null>('/interview-profile', options),
+      api<InterviewProfessions>('/interview-professions', options),
+    ])
+      .then(([interviews, savedProfile, professions]) => {
         if (controller.signal.aborted) return;
         setPage(interviews);
         setProfile(savedProfile);
+        setCatalog(professions);
       })
       .catch(error => {
         if (controller.signal.aborted) return;
@@ -177,7 +192,7 @@ export function InterviewHome({ onOpen, onSessionExpired }: {
     <p role="alert">{loadError}</p>
     <button onClick={() => retry(n => n + 1)}>Повторить загрузку</button>
   </section>;
-  if (!page) return <p role="status">Загружаем интервью…</p>;
+  if (!page || !catalog) return <p role="status">Загружаем интервью…</p>;
 
   const sorted = [...page.items].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   const visible = historyExpanded ? sorted : sorted.slice(0, previewCount);
@@ -187,9 +202,9 @@ export function InterviewHome({ onOpen, onSessionExpired }: {
     <section className="panel interview-start" aria-labelledby="new-title">
       <h2 id="new-title">{!profile || editing ? 'О вашей работе' : 'Новое интервью'}</h2>
       {!profile || editing ? <>
-        <p className="interview-profile-intro">Укажите, кем вы работаете. Остальное можно пропустить.
+        <p className="interview-profile-intro">Выберите одну профессию. Остальное можно пропустить.
           Ответы сохраняются для следующих интервью.</p>
-        <ProfileForm profile={profile} busy={!!busy} onSave={saveProfile} onCancel={() => {
+        <ProfileForm profile={profile} catalog={catalog} busy={!!busy} onSave={saveProfile} onCancel={() => {
           setEditing(false);
           setActionError('');
         }} />

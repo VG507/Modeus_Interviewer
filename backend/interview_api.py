@@ -13,6 +13,7 @@ from sqlalchemy.orm import aliased
 from sqlalchemy.orm.exc import StaleDataError
 
 from backend.auth import current_user
+from backend.catalog_topics import catalog_profiles, resolve_catalog_profession
 from backend.db import CommandReceipt, InterviewSession, KnowledgeCard, Message, Topic, User
 from backend.injection import injection_attempt
 from backend.interview_engine import choose_intent
@@ -196,6 +197,18 @@ def checked_context(body):
     if any(injection_attempt(value) for value in fields):
         raise HTTPException(422, "INJECTION_DETECTED")
     return context
+
+
+@router.get("/interview-professions")
+def interview_professions(request: Request, actor: Actor):
+    with request.app.state.sessions() as db:
+        profiles = catalog_profiles(db)
+        context = interview_profile(db, actor["id"])
+    selected = resolve_catalog_profession(None, context["role"], profiles) if context else "unknown"
+    return {
+        "items": [{"id": profile.profession_id, "title": profile.title} for profile in profiles],
+        "selected_id": selected if selected != "unknown" else None,
+    }
 
 
 @router.get("/interview-profile", response_model=InterviewContext | None)

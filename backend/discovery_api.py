@@ -14,7 +14,7 @@ from backend.discovery import (
     DiscoveryBusy, InvalidDiscoveryQuery, candidate_output, collect, item_entry, list_candidates,
     save_documentation_review,
 )
-from backend.discovery_fetch import CollectionError, ProviderRateLimit
+from backend.discovery_fetch import DNS_ERROR, CollectionError, ProviderRateLimit, is_dns_failure
 from backend.documentation import check_watches, collect_documentation, configure_watches, iso_time
 from backend.documentation_fetch import TARGETS
 from backend.esco import classification_url, concept_uri, localized_skill
@@ -27,7 +27,7 @@ from backend.vacancy_api import check_profile, require_editor, require_editor_wr
 
 router = APIRouter(prefix="/api/v1/discovery")
 SearchProvider = Literal["github", "trends"]
-Provider = Literal["github", "trends", "docs", "openalex", "skills"]
+Provider = Literal["github", "trends", "docs", "openalex", "skills", "habr"]
 SearchTerm = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=140)]
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class DocumentationProfile(Schema):
 
 class CollectionRetry(Schema):
     run_id: Annotated[str, StringConstraints(min_length=36, max_length=36)]
-    source: Literal["hh", "trudvsem", "esco", "github", "trends", "docs", "hn", "openalex", "skills"]
+    source: Literal["hh", "trudvsem", "esco", "github", "trends", "docs", "hn", "openalex", "skills", "habr"]
 
 
 class EscoMapping(Schema):
@@ -96,7 +96,7 @@ def start_collection(request: Request, actor: Actor, search: DiscoverySearch):
         raise HTTPException(502, "DISCOVERY_UNAVAILABLE") from None
     except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
         logger.warning("Discovery collection failed for %s: %s", search.provider, type(exc).__name__)
-        raise HTTPException(502, "DISCOVERY_UNAVAILABLE") from None
+        raise HTTPException(502, DNS_ERROR if is_dns_failure(exc) else "DISCOVERY_UNAVAILABLE") from None
     with sessions.begin() as db:
         db.execute(update(VacancyCollection).where(VacancyCollection.profession_id == search.profession_id)
                    .values(profession_id=search.profession_id))
@@ -180,14 +180,26 @@ def set_esco_mapping(request: Request, actor: Actor, profession_id: str, mapping
 
 @router.post("/collection/{profession_id}/esco", status_code=202)
 def collect_esco_profile(request: Request, tasks: BackgroundTasks, actor: Actor, profession_id: str):
+    return start_selected_sources(request, tasks, actor, profession_id, "esco")
+
+
+@router.post("/collection/{profession_id}/vacancies", status_code=202)
+def collect_vacancy_sources(request: Request, tasks: BackgroundTasks, actor: Actor, profession_id: str):
+    return start_selected_sources(request, tasks, actor, profession_id, ("hh", "trudvsem"))
+
+
+def start_selected_sources(request, tasks, actor, profession_id, sources):
     require_editor_write(request, actor)
     sessions = request.app.state.sessions
     with sessions.begin() as db:
         check_profile(db, profession_id)
-        run, token = profession_collection.start(db, profession_id, only="esco")
+        run, token = profession_collection.start(db, profession_id, only=sources)
     if token:
         tasks.add_task(profession_collection.refresh_sources, sessions, request.app.state.settings,
-                       profession_id, token, "esco")
+                       profession_id, token, sources)
+    elif not all(run["steps"].get(key, {}).get("status") in profession_collection.ACTIVE
+                 for key in profession_collection.selected_sources(sources)):
+        raise HTTPException(409, "DISCOVERY_BUSY")
     return run
 
 

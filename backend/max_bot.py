@@ -16,9 +16,14 @@ API_URL = "https://platform-api2.max.ru"
 class MaxBot(TelegramBot):
     account_model = MaxAccount
     channel = "MAX"
-    no_access = "Попросите у команды Modeus одноразовое приглашение и отправьте /start с полученным кодом."
+    no_access = "Нажмите «Старт» или отправьте /start в личном чате с ботом."
     # Voice answers are recognised in Telegram only.
     unsupported = "Я понимаю только текстовые сообщения."
+
+    def signup_email(self, user_id, code):
+        if not code:
+            return f"max-{user_id}@max.invalid"
+        return None
 
     def __init__(self, app, settings, *, transport=None):
         tls = ssl.create_default_context()

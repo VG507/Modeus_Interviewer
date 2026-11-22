@@ -81,14 +81,14 @@ def hint_report(name, hints, fits):
     print(f"  {name:<26} right hint {right:>2}/{len(hints)}  wrong hint {wrong:>2}  no hint {len(hints) - right - wrong:>2}")
 
 
-def theme_report(vectors, threshold):
+def theme_report(vectors, case_order, threshold):
     ids = sorted(vectors)
     neighbours = {card: {} for card in ids}
     for position, card in enumerate(ids):
         for other in ids[position + 1:]:
             if (score := similarity(vectors[card], vectors[other])) >= threshold:
                 neighbours[card][other] = neighbours[other][card] = score
-    themes = star_themes(neighbours)
+    themes = star_themes(neighbours, case_order)
     theme_of = {member: leader for leader, members in themes for member in members}
     twins = [card for card in ids if card.startswith("twin:")]
     together = sum(theme_of.get(twin) is not None and theme_of.get(twin) == theme_of.get(twin[5:]) for twin in twins)
@@ -109,6 +109,7 @@ def main():
     print(f"{len(cards)} cards, {len(queries)} queries, {len(twins)} twins\n")
     pool = {card["id"]: card["content"] for card in cards}
     pool.update({f"twin:{twin['of']}": twin["content"] for twin in twins})
+    case_order = {card: card_text(content, SECTIONS) for card, content in pool.items()}
 
     duties = json.loads(TASKS.read_text(encoding="utf-8"))["tasks"]
     cases = [(card["id"], card["content"]) for card in cards] + [(twin["of"], twin["content"]) for twin in twins]
@@ -165,7 +166,7 @@ def main():
                 duty_vectors = embed(settings, [document_prefix + duty for duty in duty_texts])
                 case_vectors = embed(settings, [query_prefix + card_text(content, sections) for _, content in cases])
                 for threshold in (0.6, 0.62, 0.63, 0.64, 0.65, 0.7):
-                    theme_report(vectors, threshold)
+                    theme_report(vectors, case_order, threshold)
                 shipped = vacancy_context.DUTY_MIN_SCORE
                 for threshold in THRESHOLDS[:4]:
                     vacancy_context.DUTY_MIN_SCORE = threshold

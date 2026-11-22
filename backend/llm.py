@@ -22,8 +22,9 @@ def canonical(value):
     return value
 
 
-def cache_key(settings, options, name, schema, instructions, payload):
-    request = {"model": settings.llm_model, "options": options, "name": name, "schema": schema,
+def cache_key(settings, options, name, schema, instructions, payload, *, cache_scope=None):
+    request = {"endpoint": settings.llm_base_url.rstrip("/"), "scope": cache_scope,
+               "model": settings.llm_model, "options": options, "name": name, "schema": schema,
                "instructions": instructions, "payload": payload}
     return hashlib.sha256(json.dumps(canonical(request), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
@@ -74,7 +75,7 @@ async def completion_json(settings, headers, local, body):
 
 
 async def structured_completion(settings: Settings, name: str, schema: dict,
-                                instructions: str, payload: dict, *, parse=None, cache=True):
+                                instructions: str, payload: dict, *, parse=None, cache=True, cache_scope=None):
     """Return the model's JSON, or parse(JSON) when given.
 
     Only answers that parse are cached, so a rejected answer is asked again on retry.
@@ -90,12 +91,15 @@ async def structured_completion(settings: Settings, name: str, schema: dict,
     options = {"reasoning_effort": settings.llm_reasoning_effort} if settings.llm_reasoning_effort else {}
     if settings.llm_temperature is not None:
         options["temperature"] = settings.llm_temperature
-    if settings.llm_seed is not None:
-        options["seed"] = settings.llm_seed
+    seed = settings.llm_seed
+    if local and "llm_seed" not in settings.model_fields_set:
+        seed = 42
+    if seed is not None:
+        options["seed"] = seed
     parse = parse or (lambda raw: raw)
     cache = cache and settings.llm_cache
     if cache:
-        key = cache_key(settings, options, name, schema, instructions, payload)
+        key = cache_key(settings, options, name, schema, instructions, payload, cache_scope=cache_scope)
         stored = cached_response(settings, key)
         if stored is not None:
             return parse(stored)

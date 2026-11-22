@@ -96,6 +96,8 @@ def test_interview_in_telegram(database_url, monkeypatch):
             assert fake.texts()[-1].startswith("Здравствуйте!")
             await send(message(7, "/new"), message(7, "Python backend-разработчик"))
             await send(press(7, "intake-skip"), press(7, "intake-skip"), press(7, "intake-skip"))
+            assert set(fake.buttons()[-3:]) == {"tone:friendly", "tone:business", "tone:playful"}
+            await send(press(7, "tone:friendly"))
             assert fake.texts()[-1].startswith("Вспомните один конкретный случай")
             interview_id = (await asyncio.to_thread(load_account, app.state.sessions, 7)).state["interview_id"]
             assert f"finish:{interview_id}" in fake.buttons()
@@ -270,6 +272,7 @@ def test_interview_stops_circling_without_new_cases(database_url, monkeypatch):
         async def interview(user, first=None, replies=0):
             await send(message(user, "/start"), message(user, "/new"), message(user, "Python-разработчик"))
             await send(*[press(user, "intake-skip")] * 3)
+            await send(press(user, "tone:friendly"))
             if first:
                 await send(message(user, first))
             for _ in range(replies):
@@ -351,6 +354,7 @@ def test_voice_answer_is_shown_and_sent_only_after_confirmation(database_url, mo
         try:
             await send(message(7, "/start"), message(7, "/new"), message(7, "Python backend-разработчик"))
             await send(press(7, "intake-skip"), press(7, "intake-skip"), press(7, "intake-skip"))
+            await send(press(7, "tone:friendly"))
             assert fake.texts()[-1].startswith("Вспомните один конкретный случай")
 
             await send(voice(7))  # no model configured

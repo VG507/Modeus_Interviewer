@@ -30,8 +30,26 @@ def current_sample(stats, profile):
     return stats.get("config_version", 1) == profile.config_version
 
 
+def vacancy_review(cards, approved_profile):
+    grounded = [
+        card for card in cards if card.get("tasks") and any(
+            evidence.get("field_path") == f"tasks.{index}" and evidence.get("quote") == task
+            for index, task in enumerate(card["tasks"]) for evidence in card.get("evidence", [])
+        )
+    ]
+    employers = len({card["employer_id"] for card in grounded if card.get("employer_id")})
+    adequate = len(grounded) >= 5 and employers >= 3 and 5 * len(grounded) >= 4 * len(cards)
+    return {"status": "automatic" if approved_profile and adequate else "pending",
+            "grounded": len(grounded), "employers": employers}
+
+
+def pending_review(stats):
+    return stats.get("review", {}).get("status") == "pending"
+
+
 def fresh_vacancy_samples(profile, trudvsem, current):
-    if sample_is_fresh(profile.updated_at, current) and current_sample(profile.stats, profile):
+    if sample_is_fresh(profile.updated_at, current) and current_sample(profile.stats, profile) and not pending_review(profile.stats):
         yield profile.cards, profile.updated_at
-    if trudvsem and sample_is_fresh(trudvsem.collected_at, current) and current_sample(trudvsem.stats, profile):
+    if (trudvsem and sample_is_fresh(trudvsem.collected_at, current)
+            and current_sample(trudvsem.stats, profile) and not pending_review(trudvsem.stats)):
         yield trudvsem.cards or [], trudvsem.collected_at

@@ -15,7 +15,7 @@ from sqlalchemy import select
 
 from backend.db import DiscoveryCandidate, DiscoveryItem, VacancyCollection, now
 from backend.discovery import collect_records, collection_lease, item_digest
-from backend.discovery_fetch import Collected, CollectionError, ProviderRateLimit, retry_seconds
+from backend.discovery_fetch import DNS_ERROR, Collected, CollectionError, ProviderRateLimit, is_dns_failure, retry_seconds
 from backend.interview_schemas import Schema
 from backend.llm import structured_completion
 from backend.source_context import ReviewedExcerpt, import_excerpts, normalize, phrase_pattern
@@ -106,8 +106,8 @@ def request_data(client, url, *, params=None, key=None, missing=False, xml=False
             return bytes(body) if xml else httpx.Response(200, content=bytes(body)).json()
     except httpx.TimeoutException:
         raise
-    except (httpx.HTTPError, ValueError):
-        raise OpenAlexError("OPENALEX_UPSTREAM") from None
+    except (httpx.HTTPError, ValueError) as exc:
+        raise OpenAlexError(DNS_ERROR if is_dns_failure(exc) else "OPENALEX_UPSTREAM") from None
 
 
 def openalex_entry(work, cutoff):
@@ -155,7 +155,7 @@ def find_works(client, key, queries, cutoff, tracked, known):
             )
         except (CollectionError, httpx.TimeoutException, KeyError, TypeError, ValueError) as exc:
             errors.append(error_code(exc))
-            if isinstance(exc, ProviderRateLimit) or getattr(exc, "code", None) == "OPENALEX_AUTH":
+            if isinstance(exc, ProviderRateLimit) or getattr(exc, "code", None) in {DNS_ERROR, "OPENALEX_AUTH"}:
                 return selected, errors
     for query in queries:
         try:
@@ -175,7 +175,7 @@ def find_works(client, key, queries, cutoff, tracked, known):
                         break
         except (CollectionError, httpx.TimeoutException, KeyError, TypeError, ValueError) as exc:
             errors.append(error_code(exc))
-            if isinstance(exc, ProviderRateLimit) or getattr(exc, "code", None) == "OPENALEX_AUTH":
+            if isinstance(exc, ProviderRateLimit) or getattr(exc, "code", None) in {DNS_ERROR, "OPENALEX_AUTH"}:
                 break
     return dict(list(selected.items())[:MAX_WORKS]), errors
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError, describe } from './api';
 import { Discovery } from './Discovery';
 import { OnetTasks } from './OnetTasks';
@@ -14,6 +14,8 @@ export function EditorData({ view, onSessionExpired }: { view: DataView; onSessi
   const [loadError, setLoadError] = useState('');
   const [reload, setReload] = useState(0);
   const [collectionRefresh, setCollectionRefresh] = useState(0);
+  const [documentationRequest, setDocumentationRequest] = useState(0);
+  const materials = useRef<HTMLDivElement>(null);
   const refreshMaterials = useCallback(() => setCollectionRefresh(value => value + 1), []);
 
   useEffect(() => {
@@ -36,7 +38,13 @@ export function EditorData({ view, onSessionExpired }: { view: DataView; onSessi
   function profileSaved(profile: Profile) {
     setProfiles(current => [...(current ?? []).filter(item => item.id !== profile.id), profile]);
     setProfession(current => current === profession ? profile.id : current);
+    setDocumentationRequest(0);
     setReload(value => value + 1);
+  }
+
+  function reviewDocumentation() {
+    setDocumentationRequest(value => value + 1);
+    materials.current?.scrollIntoView({ block: 'start' });
   }
 
   return <section className="stack">
@@ -44,7 +52,7 @@ export function EditorData({ view, onSessionExpired }: { view: DataView; onSessi
     <div className="panel">
       <label htmlFor="data-profession">Профессия</label>
       <select id="data-profession" value={profession} disabled={!profiles?.length}
-        onChange={event => setProfession(event.target.value)}>
+        onChange={event => { setDocumentationRequest(0); setProfession(event.target.value); }}>
         {!profiles?.length && <option value="">{profiles ? 'Нет профессий' : 'Загружаем профессии'}</option>}
         {profiles?.map(profile => <option key={profile.id} value={profile.id}>{profile.title || profile.id}</option>)}
       </select>
@@ -57,16 +65,16 @@ export function EditorData({ view, onSessionExpired }: { view: DataView; onSessi
       <a href="#/data/sources" aria-current={view === 'sources' ? 'page' : undefined}>Источники</a>
     </nav>
     {profession && <ProfessionCollection key={profession} profession={profession} showSourceDetails={view === 'sources'}
-      onSessionExpired={onSessionExpired} onCompleted={refreshMaterials}/>}
+      onSessionExpired={onSessionExpired} onCompleted={refreshMaterials} onReviewDocumentation={reviewDocumentation}/>}
     <div hidden={view !== 'vacancies'}>
-      <Vacancies key={profession} profile={profession} collectionRefresh={collectionRefresh}
+      <Vacancies key={profession} profile={profession} visible={view === 'vacancies'} collectionRefresh={collectionRefresh}
         onProfileSaved={profileSaved} onSessionExpired={onSessionExpired}/>
     </div>
     <div hidden={view !== 'sources'}>
       {view === 'sources' && profession && <OnetTasks key={profession} profession={profession}
         onSessionExpired={onSessionExpired}/>}
-      {profession ? <Discovery key={profession} profession={profession} collectionRefresh={collectionRefresh}
-        onSessionExpired={onSessionExpired}/> : profiles &&
+      {profession ? <div ref={materials}><Discovery key={profession} profession={profession} collectionRefresh={collectionRefresh}
+        documentationRequest={documentationRequest} onSessionExpired={onSessionExpired}/></div> : profiles &&
         <p>Добавьте профессию на вкладке «Вакансии», чтобы собирать источники.</p>}
     </div>
   </section>;

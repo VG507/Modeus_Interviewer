@@ -145,8 +145,10 @@ class CaseVector(NamedTuple):
 
     def scores(self, db, texts):
         """{text: similarity} for the texts that have a stored vector."""
-        return {value: similarity(self.vector, stored) for value, stored in cached_vectors(db, self.model, texts).items()}
+        return {value: similarity(self.vector, stored) for value, stored in cached_vectors(db, self.model, texts).items()
+                if len(stored) == len(self.vector)}
 
     def case_scores(self, db, card_ids):
         """{(card id, case index): similarity} for the cases of these cards that have a stored vector."""
-        return {key: similarity(self.vector, stored) for key, stored in case_vectors(db, self.model, card_ids).items()}
+        return {key: similarity(self.vector, stored) for key, stored in case_vectors(db, self.model, card_ids).items()
+                if len(stored) == len(self.vector)}

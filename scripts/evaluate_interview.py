@@ -37,6 +37,7 @@ def check_facts(content, scenario):
 
 async def evaluate(settings, topic, scenario):
     scenario_id = scenario["id"]
+    cache_scope = f"interview-evaluation:{scenario_id}"
     state = CaseState(asked_intents=["get_case"]).model_dump()
     opening = topic["opening_question"]
     if scenario_id in PRIOR_CASES:
@@ -54,10 +55,11 @@ async def evaluate(settings, topic, scenario):
     answer = {"id": "a1", "text": scenario["answer"]}
 
     start = monotonic()
-    evidence = await extract(settings, opening, answer, state)
+    evidence = await extract(settings, opening, answer, {**state, "llm_cache_scope": cache_scope})
     state, extraction = apply_extraction(state, evidence, answer["id"], state["asked_intents"][-1])
     intent = choose_intent(state, refused=evidence.refused, needs_rephrase=evidence.needs_rephrase)
-    question = await formulate(settings, topic["topic"]["title"], intent, answer, state) if intent else None
+    question = (await formulate(settings, topic["topic"]["title"], intent, answer,
+                                {**state, "llm_cache_scope": cache_scope})) if intent else None
     turn_seconds = round(monotonic() - start, 2)
     content, _ = await synthesize(settings, topic["topic"]["title"], state)
     violations = check_facts(content, scenario)
@@ -81,7 +83,8 @@ async def evaluate(settings, topic, scenario):
     if followup and question and intent == followup["intent"]:
         reply = {"id": "a2", "text": followup["answer"]}
         state["asked_intents"].append(intent)
-        model_state = {**state, "recent_history": [{"question": opening, "answer": answer["text"]}]}
+        model_state = {**state, "llm_cache_scope": cache_scope,
+                       "recent_history": [{"question": opening, "answer": answer["text"]}]}
         evidence = await extract(settings, question, reply, model_state)
         state, extraction = apply_extraction(state, evidence, reply["id"], intent)
         content, _ = await synthesize(settings, topic["topic"]["title"], state)

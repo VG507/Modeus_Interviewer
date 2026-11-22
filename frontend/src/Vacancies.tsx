@@ -13,6 +13,7 @@ const errors: Record<string, string> = {
   HH_AUTH_FAILED: 'HH отклонил токен при запросе вакансий.',
   HH_RATE_LIMITED: 'HH ограничил частоту запросов. Повтори сбор позже.',
   HH_UNAVAILABLE: 'HH не ответил после повторных попыток.',
+  DISCOVERY_DNS_FAILED: 'Сервер не смог разрешить имя HeadHunter (DNS).',
   HH_CANCELLED: 'Сбор остановлен.',
   HH_INVALID_RESPONSE: 'HH вернул данные в неожиданном формате.',
   HH_REQUEST_REJECTED: 'HH отклонил запрос вакансий.',
@@ -34,14 +35,15 @@ const stages = {
   queued: 'Запускаем сбор', token: 'Получаем OAuth-токен', search: 'Запрашиваем список вакансий',
   details: 'Проверяем описания', file: 'Читаем файл', saving: 'Сохраняем выборку',
 };
+type SampleReview = { status: 'automatic' | 'pending' | 'manual'; grounded: number; employers: number };
 type Profile = {
   id: string; title: string; running: boolean; error: string | null;
-  search_query: string; aliases: string[] | null; approved: boolean; review_ready: boolean;
+  search_query: string; aliases: string[] | null; approved: boolean; review_ready: boolean; current_config?: boolean;
   started_at: string | null; updated_at: string | null; stale: boolean;
   progress: { stage: keyof typeof stages; target: number; accepted: number; details_fetched: number;
     details_reused: number; reported_at: string } | null;
-  stats: { vacancies?: number; employers?: number; source?: 'hh' | 'file'; details_fetched?: number; details_reused?: number };
-  trudvsem?: { updated_at: string; vacancies: number; employers: number; stale: boolean; current_config: boolean } | null;
+  stats: { vacancies?: number; employers?: number; source?: 'hh' | 'file'; details_fetched?: number; details_reused?: number; review?: SampleReview };
+  trudvsem?: { updated_at: string; vacancies: number; employers: number; stale: boolean; current_config: boolean; review?: SampleReview | null } | null;
 };
 type Overview = { configured: boolean; profiles: Profile[] };
 type SkillCategory = {
@@ -53,6 +55,16 @@ type ProfileDraft = { id?: string; title: string; search_query: string; aliases:
 
 const dateFormat = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short' });
 const timeFormat = new Intl.DateTimeFormat('ru-RU', { timeStyle: 'medium' });
+const reviewLabels = {
+  automatic: 'Выборка подтверждена автоматически.',
+  pending: 'Выборка ждёт подтверждения модератора.',
+  manual: 'Выборка подтверждена модератором.',
+};
+
+function reviewLabel(review: SampleReview) {
+  return reviewLabels[review.status] + (review.status === 'pending'
+    ? ` Вакансий с подтверждёнными задачами: ${review.grounded}. Работодателей: ${review.employers}.` : '');
+}
 
 function Filter({ id, label, value, onChange, choices }: {
   id: string; label: string; value: string; onChange: (value: string) => void; choices: Record<string, string>;
@@ -71,8 +83,8 @@ function skillGroups(skills: string[], categories: SkillCategory[]) {
     .filter(([, members]) => members.length);
 }
 
-export function Vacancies({ profile, collectionRefresh, onProfileSaved, onSessionExpired }: {
-  profile: string; collectionRefresh: number; onProfileSaved: (profile: { id: string; title: string }) => void;
+export function Vacancies({ profile, visible, collectionRefresh, onProfileSaved, onSessionExpired }: {
+  profile: string; visible: boolean; collectionRefresh: number; onProfileSaved: (profile: { id: string; title: string }) => void;
   onSessionExpired: () => void;
 }) {
   const [experience, setExperience] = useState('');
@@ -89,6 +101,10 @@ export function Vacancies({ profile, collectionRefresh, onProfileSaved, onSessio
   const [candidates, setCandidates] = useState<Candidate[]>();
   const [candidateError, setCandidateError] = useState('');
   const selected = overview?.profiles.find(item => item.id === profile);
+  const hhNeedsReview = selected?.stats.review?.status === 'pending' && !selected.stale && selected.current_config;
+  const portal = selected?.trudvsem;
+  const portalNeedsReview = portal?.review?.status === 'pending' && !portal.stale && portal.current_config;
+  const needsReview = !selected?.approved || hhNeedsReview || portalNeedsReview;
   const hasSample = !!(selected?.updated_at || selected?.trudvsem?.updated_at);
   const revision = `${selected?.updated_at ?? ''}/${selected?.trudvsem?.updated_at ?? ''}`;
   const lastProgress = selected?.progress?.reported_at ?? selected?.started_at;
@@ -98,14 +114,17 @@ export function Vacancies({ profile, collectionRefresh, onProfileSaved, onSessio
   if (level) params.set('level', level);
   if (source) params.set('source', source);
   const query = params.toString();
-  const collection = listings?.key === query ? listings.data : undefined;
+  const listingKey = query + '/' + revision;
+  const collection = listings?.key === listingKey ? listings.data : undefined;
 
   useEffect(() => {
+    if (!visible) return;
     const controller = new AbortController();
     let timer: number | undefined;
     async function load() {
       try {
-        const data = await api<Overview>('/vacancies/overview', { signal: controller.signal });
+        const endpoint = '/vacancies/overview' + (profile ? '?profession_id=' + encodeURIComponent(profile) : '');
+        const data = await api<Overview>(endpoint, { signal: controller.signal });
         if (controller.signal.aborted) return;
         setOverview(data);
         setConnectionError('');
@@ -125,10 +144,10 @@ export function Vacancies({ profile, collectionRefresh, onProfileSaved, onSessio
     }
     void load();
     return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [refresh, collectionRefresh, onSessionExpired]);
+  }, [profile, visible, refresh, collectionRefresh, onSessionExpired]);
 
   useEffect(() => {
-    if (!hasSample) return;
+    if (!visible || !hasSample) return;
     const controller = new AbortController();
     let timer: number | undefined;
     setListError('');
@@ -136,7 +155,7 @@ export function Vacancies({ profile, collectionRefresh, onProfileSaved, onSessio
       try {
         const data = await api<Listings>(`/vacancies?${query}`, { signal: controller.signal });
         if (controller.signal.aborted) return;
-        setListings({ key: query, data });
+        setListings({ key: listingKey, data });
         setListError('');
       } catch (error) {
         if (controller.signal.aborted) return;
@@ -149,7 +168,7 @@ export function Vacancies({ profile, collectionRefresh, onProfileSaved, onSessio
     }
     void load();
     return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [query, hasSample, revision, refresh, onSessionExpired]);
+  }, [query, hasSample, listingKey, visible, refresh, onSessionExpired]);
 
   async function collect() {
     setBusy(true);
@@ -257,20 +276,24 @@ export function Vacancies({ profile, collectionRefresh, onProfileSaved, onSessio
     {selected && overview && <>
       <section className="panel" aria-label={`Выборка ${selected.title}`}>
         <h2>{selected.title}</h2>
-        <p className="meta">{selected.approved ? 'Включён для интервью' : 'Требует проверки редактора'}</p>
+        <p className="meta">{selected.approved ? 'Включён для интервью' : 'Требует проверки модератора'}</p>
         <div className="vacancy-filters">
           <Filter id="market-experience" label="Опыт" choices={experiences} value={experience} onChange={setExperience}/>
           <Filter id="market-level" label="Уровень" choices={levels} value={level} onChange={setLevel}/>
           <Filter id="market-source" label="Источник" choices={sources} value={source} onChange={setSource}/>
         </div>
         {selected.updated_at && <p>{selected.stats.source === 'file' ? 'Импорт из файла' : 'HH'} · Выборка от {dateFormat.format(new Date(selected.updated_at))}. {' '}
-          Работодателей: {selected.stats.employers ?? 0}.
+          Вакансий: {selected.stats.vacancies ?? 0}. Работодателей: {selected.stats.employers ?? 0}.
           {selected.stats.details_fetched !== undefined && ` Описаний загружено: ${selected.stats.details_fetched}. Из кэша: ${selected.stats.details_reused ?? 0}.`}</p>}
         {selected.stale && <p>Срок актуальности выборки {selected.stats.source === 'file' ? 'из файла' : 'HH'} истёк.</p>}
+        {selected.updated_at && selected.current_config === false && <p>Выборка собрана по предыдущим настройкам профиля.</p>}
+        {selected.stats.review && <p>HH · {reviewLabel(selected.stats.review)}</p>}
+        {!selected.trudvsem && <p>Работа России · сохранённой выборки пока нет.</p>}
         {selected.trudvsem && <p>Работа России · Выборка от {dateFormat.format(new Date(selected.trudvsem.updated_at))}. {' '}
           Вакансий: {selected.trudvsem.vacancies}. Работодателей: {selected.trudvsem.employers}.
           {selected.trudvsem.stale && ' Срок актуальности истёк.'}
-          {!selected.trudvsem.current_config && ' Выборка собрана по предыдущим настройкам.'}</p>}
+          {!selected.trudvsem.current_config && ' Выборка собрана по предыдущим настройкам.'}
+          {selected.trudvsem.review && ' ' + reviewLabel(selected.trudvsem.review)}</p>}
         {selected.running && <div className="market-progress" role="status">
           <span className="market-spinner" aria-hidden="true"/>
           <div><strong>{stages[selected.progress?.stage ?? 'queued']}</strong>
@@ -291,10 +314,10 @@ export function Vacancies({ profile, collectionRefresh, onProfileSaved, onSessio
             setActionError('');
             setDraft({ id: selected.id, title: selected.title, search_query: selected.search_query, aliases: selected.aliases?.join('\n') ?? '' });
           }}>Настроить профиль</button>
-          <button className="secondary" type="button" disabled={busy || (!selected.approved && !selected.review_ready)}
-            onClick={() => void reviewProfile(!selected.approved)}>
-            {selected.approved ? 'Отключить в интервью' : 'Подтвердить для интервью'}
-          </button>
+          {needsReview && <button className="secondary" type="button" disabled={busy || !selected.review_ready}
+            onClick={() => void reviewProfile(true)}>Подтвердить для интервью</button>}
+          {selected.approved && <button className="secondary" type="button" disabled={busy}
+            onClick={() => void reviewProfile(false)}>Отключить в интервью</button>}
         </div>
       </section>
       {listError && <p role="alert">{listError}</p>}
@@ -311,7 +334,7 @@ export function Vacancies({ profile, collectionRefresh, onProfileSaved, onSessio
           {group.skills.length > 6 && ` и ещё ${group.skills.length - 6}`}
         </li>)}</ul>
       </section>}
-      {hasSample && collection?.cards.map(card => <article className="panel" key={card.id}>
+      {hasSample && collection?.cards.map(card => <article className="panel" key={card.source + ':' + card.id}>
         <h2><a className="card-link" href={card.url} target="_blank" rel="noreferrer">{card.title}</a></h2>
         <p className="meta">{sources[card.source]}</p>
         {(card.experience_band || card.level) && <p>{[card.experience_band && experiences[card.experience_band],

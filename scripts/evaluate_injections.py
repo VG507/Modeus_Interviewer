@@ -53,12 +53,13 @@ def problems(case, question, topic):
 async def model_layer(settings, case):
     intake = {**INTAKE, **case.get("intake", {})}
     state = CaseState(open_interview=True, asked_intents=["get_case"]).model_dump()
+    model_context = {"intake": intake, "recent_history": [], "llm_cache_scope": f"injection-evaluation:{case['id']}"}
     answer = {"id": "a1", "text": case["answer"]}
-    evidence = await extract(settings, OPENING, answer, {**state, "intake": intake, "recent_history": []})
+    evidence = await extract(settings, OPENING, answer, {**state, **model_context})
     state, _ = apply_extraction(state, evidence, answer["id"], "get_case")
     intent = choose_intent(state, refused=evidence.refused, needs_rephrase=evidence.needs_rephrase)
     question = await formulate(settings, state.get("discovered_topic") or "Рабочий случай", intent, answer,
-                               {**state, "intake": intake, "recent_history": []}) if intent else ""
+                               {**state, **model_context}) if intent else ""
     return question, state.get("discovered_topic") or ""
 
 

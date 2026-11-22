@@ -14,7 +14,15 @@ PROFILES = {
            r"\b(?:qa|sdet|quality assurance|тестиров\w*|test engineer|инженер по тестированию)\b"),
     "devops": ("DevOps", "NAME:(DevOps OR SRE OR DevSecOps OR platform)",
                r"\b(?:devops|devsecops|sre|site reliability|platform engineer|инженер платформ\w*)\b"),
+    "ml_engineer": ("ML-инженер", 'NAME:("ML инженер" OR "ML engineer" OR "machine learning" OR "машинного обучения")',
+                    r"\b(?:(?:ml|machine learning)[ -]+(?:инженер\w*|engineer\w*)|инженер\w* (?:по )?машинно\w* обучени\w*)\b"),
 }
+ML_TITLES = ("ml инженер", "ml engineer", "machine learning engineer", "инженер машинного обучения")
+BACKEND_TITLE = re.compile(r"back[ -]?end|б[эе]к[ -]?[эе]нд", re.I)
+OTHER_PYTHON_ROLE = re.compile(
+    r"\b(?:front[ -]?end|фронтенд|аналитик|data scientist|data engineer|преподаватель|"
+    r"тестировщик|qa|sdet|computer vision|машинное зрение)\b", re.I,
+)
 
 from backend.textnorm import ALIASES, SKILL_ALIASES, canonical_skill
 
@@ -137,12 +145,34 @@ def role_key(role):
     return " ".join(re.findall(r"\w+[+#]*", role.casefold().replace("ё", "е").replace("_", " ")))
 
 
+def vacancy_preset(profession_id, profile):
+    if (profile is not None and (profession_id == "ml_engineer" or profession_id not in PROFILES) and not profile.aliases
+            and role_key(profile.title or "") in ML_TITLES):
+        return "ml_engineer"
+    if profile is None or profile.aliases is None:
+        return profession_id
+    return None
+
+
 def profile_matches(profession_id, role, profile=None):
-    if profile is not None and profile.aliases is not None:
+    preset = vacancy_preset(profession_id, profile)
+    if preset is None:
         normalized = f" {role_key(role)} "
         return any(key and f" {key} " in normalized for key in map(role_key, [profile.title, *profile.aliases]))
-    default = PROFILES.get(profession_id)
+    default = PROFILES.get(preset)
     return bool(default and re.search(default[2], role, re.IGNORECASE))
+
+
+def vacancy_title_candidate(profession_id, title, profile=None):
+    preset = vacancy_preset(profession_id, profile)
+    if preset == "python_backend":
+        if OTHER_PYTHON_ROLE.search(title):
+            return False
+        if BACKEND_TITLE.search(title):
+            return True  # Full description can supply the Python evidence.
+    if preset == "frontend" and re.search(PROFILES["qa"][2], title, re.I):
+        return False
+    return profile_matches(profession_id, title, profile)
 
 
 def level_of(text):
@@ -173,8 +203,11 @@ def parse_vacancy(item, profession_id, profile=None):
 
 def build_vacancy(item, profession_id, profile, vacancy_id, url):
     title = plain(item.get("name"))[:240]
+    if (not url or not title or item.get("archived") is True
+            or not vacancy_title_candidate(profession_id, title, profile)):
+        return None
     description = clean_html(item.get("description"))
-    if not url or not title or not description or item.get("archived") is True:
+    if not description:
         return None
     skills = {}
     evidence = []
@@ -201,12 +234,8 @@ def build_vacancy(item, profession_id, profile, vacancy_id, url):
         for skill, quote in skill_hits(value):
             add_skill(skill, field, quote)
 
-    matches_title = profile_matches(profession_id, title, profile)
-    if profession_id == "python_backend" and (profile is None or profile.aliases is None):
-        matches_title = matches_title or ("python" in skills and re.search(r"backend|б[эе]кенд", title, re.I))
-        if re.search(r"\b(?:frontend|аналитик|data scientist|data engineer|преподаватель|тестировщик)\b", title, re.I):
-            matches_title = False
-    if not matches_title:
+    if (vacancy_preset(profession_id, profile) == "python_backend"
+            and not profile_matches(profession_id, title, profile) and "python" not in skills):
         return None
 
     experience = (item.get("experience") or {}).get("id")

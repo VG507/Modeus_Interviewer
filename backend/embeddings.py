@@ -8,8 +8,9 @@ vacancy samples are embedded too, so interview questions can match them by meani
 import asyncio
 import json
 import logging
+import re
 
-from sqlalchemy import Float, String, cast, delete, literal, select, text, tuple_
+from sqlalchemy import Float, String, cast, delete, func, literal, select, text, tuple_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import load_only
 
@@ -45,6 +46,8 @@ CASES_PER_CARD = 5
 # in scripts/benchmark_vector_index.py, against 47.7 ms for the exact scan.
 INDEX_EF_SEARCH = 100
 FACT_SECTIONS = {"task": "task", "action": "actions", "decision": "decisions"}
+SHORT_SEARCH_TERMS = {"api", "bug", "cpu", "db", "dns", "gpu", "http", "json", "jwt", "sso", "tcp",
+                      "tls", "udp", "ui", "ux", "баг", "бд"}
 
 
 def case_text(case, sections=EMBEDDED_SECTIONS):
@@ -130,13 +133,14 @@ def index_vacancy_duties(sessions, settings):
 def nearest_cases_statement(model, vector, candidates, limit):
     """The pgvector query for nearest_cases, shaped so the HNSW index of migration 0027 can serve it.
 
-    The index covers `embedding::vector(N)` where `model = '<model>'`, so the query casts the same
-    way and names the model as a literal: a bound value would hide the match from a generic plan.
+    Literals let a generic PostgreSQL plan match the partial index predicate. Only vectors with
+    the query's size can be compared, including when a provider changes dimensions under the same name.
     """
     dimensions = Vector(len(vector))
     distance = cast(CardEmbedding.embedding, dimensions).op("<=>", return_type=Float)(cast(json.dumps(vector), dimensions))
     return (select(CardEmbedding.card_id, CardEmbedding.case_index, 1 - distance)
             .where(CardEmbedding.model == literal(model, String, literal_execute=True),
+                   func.vector_dims(CardEmbedding.embedding) == literal(len(vector), literal_execute=True),
                    CardEmbedding.card_id.in_(candidates))
             .order_by(distance).limit(limit))
 
@@ -152,7 +156,8 @@ def nearest_cases(db, model, vector, candidates, limit):
     else:
         query = select(CardEmbedding.card_id, CardEmbedding.case_index, CardEmbedding.embedding).where(
             CardEmbedding.model == model, CardEmbedding.card_id.in_(candidates))
-        scored = [(card_id, index, similarity(vector, json.loads(stored))) for card_id, index, stored in db.execute(query)]
+        scored = [(card_id, index, similarity(vector, stored)) for card_id, index, raw in db.execute(query)
+                  if len(stored := json.loads(raw)) == len(vector)]
     return sorted(scored, key=lambda item: (-item[2], item[0], item[1]))[:limit]
 
 
@@ -183,7 +188,8 @@ def similar_cards(db, model, card_id, candidates, limit):
 
 def terms(text):
     """Word stems and canonical skills: what search by words compares."""
-    return keywords(text) | {skill for skill, _ in skill_hits(text)}
+    short = SHORT_SEARCH_TERMS.intersection(re.findall(r"[^\W\d_]+", text.casefold()))
+    return keywords(text) | short | {skill for skill, _ in skill_hits(text)}
 
 
 def word_share(wanted, content):

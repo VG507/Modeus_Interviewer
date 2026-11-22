@@ -35,8 +35,13 @@ INTAKE = (
     ("role", "Кем вы работаете? Например, «Python backend-разработчик».", 200),
     ("experience", "Как давно вы этим занимаетесь?", 1000),
     ("responsibilities", "Какими задачами вы обычно занимаетесь?", 1000),
-    ("conditions", "Что важно знать о вашей работе? Можно рассказать о продукте, команде или ограничениях.", 1000),
+    ("conditions", "В каких условиях вы работаете? В одном-двух предложениях расскажите, над каким продуктом "
+     "вы работаете, как устроена команда или какие ограничения влияют на ваши решения.\n\n"
+     "Например, в команде из пяти человек развиваем сервис оплаты. "
+     "Обновления выпускаем без остановки сервиса.", 1000),
+    ("tone", "В каком тоне ваш интервьюер будет задавать вопросы?", 30),
 )
+TONE_LABELS = {"friendly": "Дружелюбный", "business": "Деловой", "playful": "Шутливый"}
 STAGES = {
     "initial_question": "Готовлю первый вопрос",
     "extraction": "Разбираю ответ",
@@ -50,7 +55,7 @@ PROCESSING_ERRORS = {
     "INVALID_MODEL_OUTPUT": "Модель вернула ответ в неподходящем формате.",
 }
 ONE_SHOT = {"skip", "retry", "finish-yes", "finish-no", "intake-skip", "role", "layout-yes", "layout-no",
-            "publish", "publish-anon", "publish-name", "voice-send", "voice-drop"}
+            "intake-keep-role", "tone", "publish", "publish-anon", "publish-name", "voice-send", "voice-drop"}
 COMMANDS = [
     {"command": "new", "description": "Начать новое интервью"},
     {"command": "profile", "description": "Обновить анкету"},
@@ -149,7 +154,7 @@ def invite_link(settings, code):
     return f"https://t.me/{username}?start={code}"
 
 
-def link_account(sessions, telegram_id, chat_id, code, open_signup, *, account_model=TelegramAccount):
+def link_account(sessions, telegram_id, chat_id, code, signup_email, *, account_model=TelegramAccount):
     """Link the chat by invite, by an earlier link or by open sign-up; return (user_id, invite status)."""
     with sessions.begin() as db:
         status = "invalid" if code else None
@@ -165,11 +170,10 @@ def link_account(sessions, telegram_id, chat_id, code, open_signup, *, account_m
         elif account is not None:
             account.chat_id = chat_id
             return account.user_id, status
-        elif open_signup:
-            email = f"telegram-{telegram_id}@telegram.invalid"
-            user_id = db.scalar(select(User.id).where(User.email == email))
+        elif signup_email:
+            user_id = db.scalar(select(User.id).where(User.email == signup_email))
             if user_id is None:
-                user = User(email=email, password_hash=hash_password(secrets.token_urlsafe(24)))
+                user = User(email=signup_email, password_hash=hash_password(secrets.token_urlsafe(24)))
                 db.add(user)
                 db.flush()
                 user_id = user.id
@@ -524,10 +528,15 @@ class TelegramBot:
             return await self.intake_answer(account, text)
         self.buffer(account, text)
 
+    def signup_email(self, user_id, code):
+        if self.settings.telegram_open_signup:
+            return f"telegram-{user_id}@telegram.invalid"
+        return None
+
     async def start(self, telegram_id, chat_id, code):
         user_id, invite = await asyncio.to_thread(
             link_account, self.sessions, telegram_id, chat_id, code,
-            self.account_model is TelegramAccount and self.settings.telegram_open_signup, account_model=self.account_model)
+            self.signup_email(telegram_id, code), account_model=self.account_model)
         if invite == "invalid":
             await self.send(chat_id, "Ссылка-приглашение недействительна или устарела.")
         if user_id is None:
@@ -562,9 +571,15 @@ class TelegramBot:
                                message_id=message["message_id"], reply_markup={"inline_keyboard": []})
         if action == "new":
             await self.new_interview(account)
-        elif action == "intake-skip" and account.state.get("step") in {name for name, *_ in INTAKE[1:]}:
+        elif action == "intake-skip" and account.state.get("step") in {"experience", "responsibilities", "conditions"}:
             field = account.state["step"]
             await self.intake_answer(account, (account.state.get("intake") or {}).get(field, ""))
+        elif action == "intake-keep-role" and account.state.get("step") == "role":
+            role = (account.state.get("intake") or {}).get("role")
+            if role:
+                await self.intake_answer(account, role)
+        elif action == "tone" and account.state.get("step") == "tone" and value in TONE_LABELS:
+            await self.intake_answer(account, value)
         elif action == "role" and account.state.get("step") == INTAKE[0][0]:
             catalog = await asyncio.to_thread(professions, self.sessions)
             title = next((item.title for item in catalog if item.profession_id == value), "")
@@ -707,9 +722,16 @@ class TelegramBot:
 
     async def start_intake(self, account, *, profile=None, edit=False):
         await self.set_state(account, step=INTAKE[0][0], intake=profile or {}, intake_edit=edit)
-        intro = ("Обновим анкету. Необязательные ответы можно оставить как есть." if profile else
+        intro = ("Обновим анкету. Сохранённые ответы можно оставить как есть." if profile else
                  "Расскажите немного о работе. Сохраню ответы для следующих интервью.")
-        await self.send(account.chat_id, f"{intro}\n\n{escape(INTAKE[0][1])}")
+        buttons = [[("Оставить как есть", "intake-keep-role")]] if profile else None
+        await self.send(account.chat_id, f"{intro}\n\n{escape(INTAKE[0][1])}", buttons)
+
+    async def ask_tone(self, account, prompt, intake):
+        if account.state.get("intake_edit"):
+            current = TONE_LABELS[intake.get("tone", "friendly")]
+            prompt += f"\n\nСейчас выбран тон «{current.lower()}»."
+        await self.send(account.chat_id, prompt, [[(label, f"tone:{key}")] for key, label in TONE_LABELS.items()])
 
     async def intake_answer(self, account, value, listed=False):
         names = [name for name, *_ in INTAKE]
@@ -719,6 +741,10 @@ class TelegramBot:
             raise Notice(prompt)
         if len(value) > limit:
             raise Notice(f"Ответ должен быть не длиннее {limit} символов.")
+        if name == "tone" and value not in TONE_LABELS:
+            value = next((key for key, label in TONE_LABELS.items() if label.casefold() == value.casefold()), None)
+            if value is None:
+                return await self.ask_tone(account, prompt, account.state["intake"])
         note = ""
         if index == 0 and not listed:
             catalog = await asyncio.to_thread(professions, self.sessions)
@@ -738,10 +764,12 @@ class TelegramBot:
                 value, note = profile.title, f"Записал профессию: {escape(profile.title)}.\n\n"
         intake = {**account.state.get("intake", {}), name: value}
         if index + 1 < len(INTAKE):
-            await self.set_state(account, step=names[index + 1], intake=intake)
-            skip_label = "Оставить как есть" if intake.get(names[index + 1]) else "Пропустить"
-            return await self.send(account.chat_id, note + escape(INTAKE[index + 1][1]),
-                                   [[(skip_label, "intake-skip")]])
+            next_name, next_prompt, _ = INTAKE[index + 1]
+            account = await self.set_state(account, step=next_name, intake=intake)
+            if next_name == "tone":
+                return await self.ask_tone(account, next_prompt, intake)
+            skip_label = "Оставить как есть" if intake.get(next_name) else "Пропустить"
+            return await self.send(account.chat_id, note + escape(next_prompt), [[(skip_label, "intake-skip")]])
         await self.request(account.user_id, "PUT", "/interview-profile", intake)
         edit = account.state.get("intake_edit")
         account = await self.set_state(account, step=None, intake=None, intake_edit=None)

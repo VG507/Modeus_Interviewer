@@ -62,7 +62,23 @@ def test_same_request_gets_the_stored_answer(provider):
     assert ask(settings(), instructions="Задай другой вопрос.") != first
     assert ask(settings(llm_model="other-model")) != first
     assert ask(settings(llm_temperature=1)) != first
-    assert len(requests) == 4
+    assert ask(settings(llm_base_url="http://other-provider.test/v1")) != first
+    assert len(requests) == 5
+
+
+def test_interviews_reuse_only_their_own_model_answers(provider):
+    settings, requests, _ = provider
+
+    def ask_question(interview_id):
+        return asyncio.run(interview_engine.ask_model(
+            settings(), interview_engine.Question, "Задай вопрос.", {"answer": "Добавил индекс."},
+            cache_scope=interview_id,
+        )).text
+
+    assert ask_question("interview-one") == ask_question("interview-one") == "ответ 1"
+    assert ask_question("interview-two") == ask_question("interview-two") == "ответ 2"
+    assert requests[0] == requests[1]
+    assert "interview-one" not in json.dumps(requests[0])
 
 
 def test_rejected_answer_is_asked_again(provider):
@@ -118,6 +134,17 @@ def test_sampling_options_reach_the_provider(provider):
     assert "temperature" not in requests[1] and "seed" not in requests[1]
     with pytest.raises(ValidationError):
         settings(llm_temperature=3)
+
+
+def test_seed_default_is_local_and_can_be_disabled(provider, monkeypatch):
+    settings, requests, _ = provider
+    monkeypatch.delenv("LLM_SEED", raising=False)
+    local = "http://127.0.0.1:11434/v1"
+    ask(settings(_env_file=None, llm_base_url=local))
+    ask(settings(_env_file=None, llm_base_url=local, llm_seed=""))
+    ask(settings(_env_file=None))
+    assert requests[0]["seed"] == 42
+    assert all("seed" not in request for request in requests[1:])
 
 
 def test_card_keeps_the_order_the_expert_told_without_the_model(monkeypatch):

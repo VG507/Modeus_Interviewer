@@ -142,7 +142,7 @@ export function DocumentationReview<T extends ReviewItem>({ item, profession, on
   }
 
   return <details>
-    <summary>Решение редактора</summary>
+    <summary>Решение модератора</summary>
     <form onSubmit={submit}>
       <fieldset className="stack" disabled={saving}>
         <label>Решение <select value={decision} onChange={event => setDecision(event.target.value)}>

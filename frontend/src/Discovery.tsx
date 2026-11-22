@@ -3,7 +3,8 @@ import { api, ApiError, describe } from './api';
 import { DocumentationReview, DocumentationSettings } from './Documentation';
 
 const searchProviders = { github: 'GitHub Issues', trends: 'GitHub Trends' } as const;
-const providers = { ...searchProviders, docs: 'Официальная документация', openalex: 'Научные статьи', skills: 'Agent Skills' } as const;
+const providers = { ...searchProviders, docs: 'Официальная документация', openalex: 'Научные статьи',
+  skills: 'Agent Skills', habr: 'Хабр' } as const;
 type Provider = keyof typeof providers;
 const statuses: Record<string, string> = {
   new: 'Новый', review: 'На проверке', accepted: 'Допущен к интервью', observe: 'Наблюдаем',
@@ -17,9 +18,12 @@ const searchFields = {
 type Item = {
   id: string; digest: string; title: string; url: string; provider: Provider; observed_at: string; status: string; reason: string | null;
   weekly_star_change?: number | null;
+  unreviewed_revision?: boolean;
   assessment: {
     resolution_url?: string; resolution_quote?: string; checked_at?: string;
     task?: string; quote?: string; method?: string; sample?: string; limitation?: string; conditions?: string[];
+    automatic?: boolean;
+    action?: string; verification?: string; technology?: string; version?: string | null;
     sections?: Record<string, string>;
   } | null;
 };
@@ -35,6 +39,7 @@ type ItemDetail = Item & {
     doi?: string; venue?: string; authors?: string[]; publication_date?: string; review_url?: string;
     crossref_checked?: boolean; full_text_sha256?: string; published_licenses?: string[];
     repository?: string; commit?: string; license?: string; dependencies?: string[];
+    author?: string; rating?: number | null;
   };
 };
 
@@ -53,6 +58,29 @@ function fragmentLabel(key: string) {
 
 function Detail({ item }: { item: ItemDetail }) {
   const data = item.payload;
+  if (item.provider === 'habr') {
+    const evidence = item.assessment;
+    const quotes = [
+      { label: 'Проблема', text: evidence?.quote },
+      { label: 'Действие', text: evidence?.action },
+      { label: 'Проверка результата', text: evidence?.verification },
+    ];
+    return <div className="stack">
+      <p className="meta">{[data.author, date(data.publication_date),
+        data.rating != null && `Рейтинг ${data.rating}`, ...(data.topics ?? [])].filter(Boolean).join(' · ')}</p>
+      {item.reason && <p>{item.reason}</p>}
+      {evidence?.task && <p><strong>Рабочая задача</strong> {evidence.task}</p>}
+      {evidence?.technology && <p className="meta">{[evidence.technology, evidence.version].filter(Boolean).join(' ')}</p>}
+      {!!evidence?.conditions?.length && <p><strong>Условия кейса</strong> {evidence.conditions.join(' · ')}</p>}
+      {quotes.filter(entry => entry.text).map(({ label, text }) => <div key={label}>
+        <strong>{label}</strong><blockquote className="discovery-fragment">{text}</blockquote>
+      </div>)}
+      {data.fragments?.rss && <details>
+        <summary>Исходный фрагмент из RSS</summary>
+        <p className="discovery-fragment">{data.fragments.rss.text}</p>
+      </details>}
+    </div>;
+  }
   if (item.provider === 'skills') {
     const evidence = item.assessment as (ItemDetail['assessment'] & {
       inputs?: string; output?: string; verification?: string; human_check?: string; limitation?: string;
@@ -109,6 +137,11 @@ function Detail({ item }: { item: ItemDetail }) {
     {(data.labels ?? data.topics)?.length ?
       <p className="meta">{(data.labels ?? data.topics)?.join(' · ')}</p> : null}
     {item.reason && <p>{item.reason}</p>}
+    {item.provider === 'docs' && item.status === 'accepted' && item.assessment?.automatic && <div>
+      <p>{item.assessment.task}</p>
+      <blockquote>{item.assessment.quote}</blockquote>
+      {!!item.assessment.conditions?.length && <p>Условия применимости — {item.assessment.conditions.join(', ')}.</p>}
+    </div>}
     {item.assessment?.resolution_url && <p>
       <a href={item.assessment.resolution_url} target="_blank" rel="noreferrer">Подтверждение исправления</a>
       {item.assessment.resolution_quote && <> · {item.assessment.resolution_quote}</>}
@@ -126,8 +159,8 @@ function Detail({ item }: { item: ItemDetail }) {
   </div>;
 }
 
-export function Discovery({ profession, collectionRefresh, onSessionExpired }: {
-  profession: string; collectionRefresh: number; onSessionExpired: () => void;
+export function Discovery({ profession, collectionRefresh, documentationRequest, onSessionExpired }: {
+  profession: string; collectionRefresh: number; documentationRequest: number; onSessionExpired: () => void;
 }) {
   const [provider, setProvider] = useState<Provider | ''>('');
   const [offset, setOffset] = useState(0);
@@ -172,7 +205,7 @@ export function Discovery({ profession, collectionRefresh, onSessionExpired }: {
     return abort;
   }, [selected, profession, reload, collectionRefresh, onSessionExpired]);
 
-  const awaitingAutomaticCheck = page?.items.some(item => item.status === 'automatic_check');
+  const awaitingAutomaticCheck = page?.items.some(item => item.status === 'automatic_check' || item.unreviewed_revision);
   useEffect(() => {
     if (!awaitingAutomaticCheck) return;
     const timer = window.setInterval(() => setReload(value => value + 1), 15000);
@@ -186,6 +219,14 @@ export function Discovery({ profession, collectionRefresh, onSessionExpired }: {
   function showPage(next: number) {
     selectItem(''); setPage(null); setError(''); setOffset(next);
   }
+
+  useEffect(() => {
+    if (documentationRequest) {
+      setProvider('docs');
+      showPage(0);
+      setReload(value => value + 1);
+    }
+  }, [documentationRequest]);
 
   async function collectForProfession(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

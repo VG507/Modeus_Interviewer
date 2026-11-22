@@ -11,7 +11,8 @@ from pydantic import BaseModel, Field, StrictBool, StringConstraints, model_vali
 from sqlalchemy import func, select
 
 from backend.catalog_topics import catalog_topic_columns, profession_for_card
-from backend.db import CardEvent, KnowledgeCard, Message, now
+from backend.db import CardEvent, KnowledgeCard, Message, User, now
+from backend.demo_auth import card_owners
 from backend.embeddings import (
     SEARCH_POOL, SIMILAR_MIN_SCORE, configured as embeddings_configured, refresh_index, search_cards, similar_cards,
 )
@@ -214,9 +215,12 @@ def accessible_card(db, card_id, actor, access="read"):
     card = db.get(KnowledgeCard, card_id)
     if card is not None:
         is_owner = card.owner_id == actor["id"]
-        editorial_access = actor["is_editor"] and card.first_submitted_at is not None
-        if (is_owner and access != "editorship") or (editorial_access and access != "ownership"):
+        if is_owner and access != "editorship":
             return card
+        if access != "ownership" and actor["is_editor"] and card.first_submitted_at is not None:
+            owner = db.get(User, card.owner_id)
+            if owner and owner.demo_group == actor.get("demo_group"):
+                return card
     raise HTTPException(404, "CARD_NOT_FOUND")
 
 
@@ -269,7 +273,8 @@ def list_cards(request: Request, response: Response, actor: Actor, limit: PageSi
     else:
         editor_only(actor)
         status = "in_review" if scope == "review" else "published"
-        query = query.where(KnowledgeCard.first_submitted_at.is_not(None), KnowledgeCard.publication_status == status)
+        query = query.where(KnowledgeCard.first_submitted_at.is_not(None), KnowledgeCard.publication_status == status,
+                            KnowledgeCard.owner_id.in_(card_owners(actor.get("demo_group"))))
     with request.app.state.sessions() as db:
         rows, next_cursor = newest_page(db, query, KnowledgeCard, limit, cursor)
         return {"items": [card_view(card) for (card,) in rows], "next_cursor": next_cursor}
@@ -491,7 +496,7 @@ def submit_card(request: Request, actor: Actor, key: CommandKey, card_id: Identi
 def review_card(request: Request, tasks: BackgroundTasks, actor: Actor, key: CommandKey, card_id: Identifier,
                 body: ReviewCard):
     settings = request.app.state.settings
-    if body.decision == "accept" and embeddings_configured(settings):
+    if body.decision == "accept" and not actor.get("is_demo") and embeddings_configured(settings):
         # Runs after the response; the periodic index round picks the card up if this fails.
         tasks.add_task(refresh_index, request.app.state.sessions, settings, [card_id])
 

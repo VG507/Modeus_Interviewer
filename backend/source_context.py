@@ -142,7 +142,7 @@ def sources_for_followup(db, intake, state, intent, answer_text="", case_vector=
     ).outerjoin(DiscoveryCandidate, DiscoveryCandidate.excerpt_id == SourceExcerpt.id)
         .outerjoin(DiscoveryItem, DiscoveryItem.id == DiscoveryCandidate.item_id).where(or_(
             DiscoveryCandidate.item_id.is_(None),
-            DiscoveryItem.provider.in_(("github", "docs", "openalex", "skills")) & (DiscoveryCandidate.status == "accepted")
+            DiscoveryItem.provider.in_(("github", "docs", "openalex", "skills", "habr")) & (DiscoveryCandidate.status == "accepted")
             & (DiscoveryCandidate.reviewed_digest == DiscoveryItem.digest)
             & (DiscoveryCandidate.valid_until > now()) & or_(DiscoveryItem.provider != "docs", subscribed),
         )))
@@ -167,7 +167,8 @@ def sources_for_followup(db, intake, state, intent, answer_text="", case_vector=
             "kind": excerpt.kind, "purpose": excerpt.purpose, "title": excerpt.title, "url": url,
             "task_excerpt": excerpt.quote, "detail": excerpt.detail, "version": excerpt.version,
             "skills": [cs] if excerpt.technology and (cs := canonical_skill(excerpt.technology)) else [],
-            **({"provider": provider, "item_id": item_id, "revision_digest": digest} if provider == "skills" else {}),
+            **({"provider": provider, "item_id": item_id, "revision_digest": digest}
+               if provider in {"skills", "habr"} else {}),
         }))
     if not matches:
         return sources_for_question(db, intake, state, intent, profession_id=profession_id,
@@ -184,12 +185,12 @@ def sources_for_followup(db, intake, state, intent, answer_text="", case_vector=
     return hints
 
 
-def skill_sources_current(db, sources):
-    for source in sources:
+def discovery_sources_current(db, sources):
+    for source in sorted(sources, key=lambda source: source["item_id"]):
         current = db.scalar(select(DiscoveryItem.id).join(DiscoveryCandidate).join(
             SourceExcerpt, SourceExcerpt.id == DiscoveryCandidate.excerpt_id,
         ).where(
-            DiscoveryItem.provider == "skills", DiscoveryItem.id == source["item_id"],
+            DiscoveryItem.provider == source["provider"], DiscoveryItem.id == source["item_id"],
             DiscoveryItem.digest == source["revision_digest"],
             DiscoveryCandidate.profession_id == source["profession_id"], DiscoveryCandidate.status == "accepted",
             DiscoveryCandidate.reviewed_digest == DiscoveryItem.digest, DiscoveryCandidate.valid_until > now(),

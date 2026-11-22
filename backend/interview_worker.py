@@ -29,7 +29,7 @@ from backend.interview_engine import (
 )
 from backend.interview_schemas import CaseState, OPEN_TOPIC_ID
 from backend.knowledge import prior_case_context, publication_versions_current, published_context
-from backend.source_context import skill_sources_current, sources_for_followup
+from backend.source_context import discovery_sources_current, sources_for_followup
 from backend.vacancy_context import QUESTION_INTENTS
 
 logger = logging.getLogger(__name__)
@@ -243,7 +243,7 @@ async def execute_stage(sessions, settings, interview_id, token):
             raise InvalidJob("Missing interview topic")
         title, opening = state.get("discovered_topic") or topic.title, topic.opening_question
         message = job_answer(db, interview, job)
-        model_state = {**state, "intake": interview.context,
+        model_state = {**state, "llm_cache_scope": interview.id, "intake": interview.context,
                        "recent_history": recent_history(db, interview, message)}
         market_sources = []
         publication_versions = {}
@@ -353,11 +353,11 @@ async def execute_stage(sessions, settings, interview_id, token):
                 interview.status = "completed"
                 clear_job(interview)
             else:
-                skill_sources = [source for source in market_sources if source.get("provider") == "skills"]
-                if publication_versions or skill_sources:
+                discovery_sources = [source for source in market_sources if source.get("provider") in {"skills", "habr"}]
+                if publication_versions or discovery_sources:
                     db.flush()
                     if ((publication_versions and not publication_versions_current(db, publication_versions))
-                            or not skill_sources_current(db, skill_sources)):
+                            or not discovery_sources_current(db, discovery_sources)):
                         output = fallback_question(job["intent"], intake_tone(model_state))
                         market_sources = []
                 message = append_message(db, interview, kind="question", text=output, market_sources=market_sources or None)

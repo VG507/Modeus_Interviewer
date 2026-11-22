@@ -29,6 +29,8 @@ PATTERNS = (
              r"(?:\w+\W+)?(?:промпт|инструкц|правил|настройк|сообщени)\w*"),
     ("leak", r"\b(?:повтори|выведи|процитируй|скопируй)(?:те)?\b(?:\W+\w+){0,4}?\W+(?:текст\W+)?(?:выше|сверху)\b"),
     ("leak", r"\b(?:промпт|инструкц)\w*\W+(?:\w+\W+)?у\s+(?:тебя|вас)\b|\bу\s+(?:тебя|вас)\W+(?:\w+\W+){0,2}(?:промпт|инструкц)\w*"),
+    ("leak", rf"\bкак(?:ие|ов[аы]?)\s+(?:тво[ияе]|ваш[иае]|сво[ияе])\s+"
+             rf"(?:системн\w*|скрыт\w*|внутренн\w*|исходн\w*)\s+{RULES}"),
     ("leak", r"\b(?:reveal|show|print|repeat|output|display|tell\s+me)\b(?:\W+\w+){0,3}?\W+"
              r"(?:system\s+prompt|your\s+(?:instructions|prompt|rules)|initial\s+(?:prompt|instructions)|the\s+text\s+above)"),
     ("leak", r"\bwhat\s+(?:is|are)\s+your\s+(?:system\s+)?(?:prompt|instructions|rules)\b"),
@@ -36,9 +38,11 @@ PATTERNS = (
     ("roleplay", r"\bпредставь(?:те)?\W+(?:себе\W+)?что\s+(?:ты|вы)\b"),
     ("roleplay", r"\b(?:притворись|притворитесь|веди(?:те)?\s+себя\s+как|сыграй(?:те)?\s+роль|играй(?:те)?\s+роль|войди(?:те)?\s+в\s+роль)"),
     ("roleplay", r"\b(?:ты|вы)\s+(?:\w+\s+){0,2}без\s+(?:каких-либо\s+|всяких\s+)?(?:ограничений|цензуры|фильтров|правил)\b"),
-    ("roleplay", r"\bрежим\w*\s+(?:разработчика|бога|без\s+ограничений)|\bdeveloper\s+mode\b|\bjail\s*break\w*|\bджейлбрейк\w*"
-                 r"|\bdo\s+anything\s+now\b|(?:\bты|\byou\s+are|\bрежим\w*|\bmode)\W+dan\b|\bdan\W+(?:mode|режим)"),
-    ("roleplay", r"\byou\s+are\s+now\b|\bpretend\s+(?:to\s+be|you\s+are)\b|\brole-?play\b"
+    ("roleplay", r"\b(?:включи|активируй|запусти)(?:те)?\s+(?:\w+\s+)?режим\s+"
+                 r"(?:разработчика|бога|без\s+ограничений|dan)\b|\bперейди(?:те)?\s+в\s+режим\s+"
+                 r"(?:разработчика|бога|без\s+ограничений|dan)\b|\b(?:enable|activate|enter)\s+(?:the\s+)?(?:developer|dan)\s+mode\b"
+                 r"|\bdo\s+anything\s+now\b|(?:\bты|\byou\s+are)\W+dan\b"),
+    ("roleplay", r"\byou\s+are\s+now\b|\bpretend\s+(?:to\s+be|you\s+are)\b|\brole-?play\s+as\b"
                  r"|\bact\s+as\s+(?:an?\s+|my\s+)?(?:\w+\s+)?(?:assistant|ai|gpt|chatbot|character|hacker|dan)\b"),
     ("format", r"<\s*/?\s*(?:system|assistant|user|developer|instructions?|prompt|answer|sentences?)\s*>"),
     ("format", r"(?:^|\n)\s*(?:system|assistant|developer|системное\s+сообщение|ассистент)\s*:"),

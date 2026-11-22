@@ -4,12 +4,16 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 
+MAX_VACANCY_SAMPLE_LIMIT = 500
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
     database_url: str = "sqlite:///./.work/modeus.db"
     app_origin: str = "http://localhost:5173"
     cookie_secure: bool = False
     session_hours: int = Field(default=12, ge=1, le=168)
+    demo_auth_enabled: bool = False
     llm_base_url: str = ""
     llm_model: str = ""
     llm_api_key: str = Field(default="", repr=False)
@@ -28,11 +32,13 @@ class Settings(BaseSettings):
     hh_client_secret: str = Field(default="", repr=False)
     hh_areas: str = "113"
     hh_weekly_enabled: bool = True
+    vacancy_sample_limit: int = Field(default=MAX_VACANCY_SAMPLE_LIMIT, ge=1, le=MAX_VACANCY_SAMPLE_LIMIT)
     trudvsem_collection_enabled: bool = True
     esco_collection_enabled: bool = True
     esco_version: str = Field(default="v1.2.0", max_length=24, pattern=r"^v\d+\.\d+\.\d+$")
     documentation_weekly_enabled: bool = True
     hn_collection_enabled: bool = True
+    habr_collection_enabled: bool = True
     github_token: str = Field(default="", repr=False)
     openalex_api_key: str = Field(default="", repr=False)
     # faster-whisper model for voice answers in Telegram, e.g. large-v3-turbo; empty keeps voice off.

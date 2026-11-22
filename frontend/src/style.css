@@ -83,6 +83,7 @@ main { max-width: 1180px; margin: 0 auto; padding: 24px 28px 72px; }
 .account, .actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .account { color: var(--text-muted); font-size: .875rem; }
 .account > span { padding: 5px 10px; background: var(--surface-soft); border-radius: 6px; }
+.masthead-side .role-switch { width: auto; margin: 0; padding: 7px 8px; font-size: .875rem; }
 .masthead nav a {
   padding: 7px 10px; border-radius: 6px; color: var(--text-muted);
   font-size: .92rem; font-weight: 550; text-decoration: none;
@@ -105,6 +106,9 @@ p { margin: 0 0 12px; }
   border-radius: 8px; box-shadow: var(--shadow);
 }
 .login { max-width: 460px; }
+.demo-login fieldset { display: grid; gap: 18px; }
+.demo-login button { width: 100%; }
+.demo-login p { margin: 7px 0 0; color: var(--text-muted); font-size: .92rem; }
 .workspace { display: grid; grid-template-columns: 1.12fr 1fr; gap: 22px; align-items: start; }
 .workspace-error { grid-column: 1 / -1; }
 .vacancy-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
@@ -237,16 +241,16 @@ button:disabled { opacity: .55; cursor: not-allowed; box-shadow: none; }
 }
 @media (max-width: 720px) {
   main { padding: 14px 14px 44px; }
-  .masthead { margin-bottom: 24px; padding: 12px; grid-template-columns: 1fr; justify-items: center; }
-  .masthead > .actions, .masthead-side { grid-column: 1; }
-  .masthead-side { justify-self: center; }
+  .masthead { margin-bottom: 24px; padding: 12px; gap: 8px; grid-template-columns: auto 1fr; }
+  .masthead > .actions { grid-area: 2 / 1 / 3 / -1; }
+  .masthead-side { grid-area: 1 / 2; gap: 4px; justify-content: flex-end; }
   .panel { padding: 20px; border-radius: 8px; }
   .workspace { grid-template-columns: 1fr; }
   .turn { max-width: 96%; }
 }
 @media (max-width: 480px) {
   .interview-profile-basics, .interview-project-fields { grid-template-columns: 1fr; }
-  .account { width: 100%; justify-content: space-between; }
+  .account button { padding-inline: 5px; }
   .masthead nav a { padding-inline: 7px; }
 }
 

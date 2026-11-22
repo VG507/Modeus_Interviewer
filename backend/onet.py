@@ -12,6 +12,7 @@ from sqlalchemy import select
 
 from backend.db import OnetProfile, VacancyCollection, insert_for, now
 from backend.documentation import iso_time
+from backend.vacancy_parser import ML_TITLES
 
 
 VERSION = "31.0"
@@ -26,7 +27,6 @@ OCCUPATIONS = {
     "devops": "15-1299.08",
 }
 ML_CODE = "15-2051.00"
-ML_TITLES = ("ml инженер", "ml engineer", "machine learning engineer", "инженер машинного обучения")
 # Local interview prompts derived from selected tasks in release 31.0.
 EXAMPLES = {
     "python_backend": {

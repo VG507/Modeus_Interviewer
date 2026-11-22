@@ -2,6 +2,7 @@
 
 import base64
 import re
+import socket
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -35,6 +36,17 @@ class ProviderRateLimit(CollectionError):
     def __init__(self, message, retry_after=None):
         super().__init__(message)
         self.retry_after = retry_after
+
+
+DNS_ERROR = "DISCOVERY_DNS_FAILED"
+
+
+def is_dns_failure(error):
+    while error is not None:
+        if isinstance(error, socket.gaierror):
+            return True
+        error = error.__cause__ or error.__context__
+    return False
 
 
 def retry_seconds(headers):

@@ -1,7 +1,6 @@
 """Collect IT stories and bounded comment snapshots from the official Hacker News API."""
 
 import re
-import socket
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -14,7 +13,7 @@ import httpx
 from sqlalchemy import and_, case, func, or_, select
 
 from backend.db import HackerNewsItem, VacancyCollection, insert_for, now
-from backend.discovery_fetch import CollectionError, fetch
+from backend.discovery_fetch import CollectionError, fetch, is_dns_failure
 from backend.vacancy_parser import SKILL_ALIASES, canonical_skill, clean_html, plain
 from backend.vacancy_samples import fresh_vacancy_samples, trudvsem_samples
 
@@ -38,16 +37,13 @@ DNS_FAILURE = "DNS lookup failed"
 
 
 class HackerNewsUnavailable(CollectionError):
-    pass
+    def __init__(self, message, *, dns_failure=False):
+        super().__init__(message)
+        self.dns_failure = dns_failure
 
 
 def request_error(exc):
-    cause = exc
-    while cause is not None:
-        if isinstance(cause, socket.gaierror):
-            return DNS_FAILURE
-        cause = cause.__cause__ or cause.__context__
-    return type(exc).__name__
+    return DNS_FAILURE if is_dns_failure(exc) else type(exc).__name__
 
 
 def item_ids(value):
@@ -86,12 +82,13 @@ def collect_ranks(client, pool, feed_limit, deadline):
     if len(failures) == len(FEEDS):
         errors = ", ".join(f"{feed}: {error}" for feed, error in failures.items())
         message = f"Hacker News feeds unavailable ({errors})"
-        if set(failures.values()) == {DNS_FAILURE}:
+        dns_failure = set(failures.values()) == {DNS_FAILURE}
+        if dns_failure:
             message = (
                 "DNS lookup failed while connecting to hacker-news.firebaseio.com. "
                 "Check DNS in this terminal or use an approved HTTPS_PROXY if your network requires one."
             )
-        raise HackerNewsUnavailable(message)
+        raise HackerNewsUnavailable(message, dns_failure=dns_failure)
     return ranks, failures
 
 

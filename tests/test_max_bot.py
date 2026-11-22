@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from backend import interview_worker
 from backend.app import create_app
-from backend.db import KnowledgeCard, MaxAccount, TelegramAccount, User
+from backend.db import InterviewSession, KnowledgeCard, MaxAccount, TelegramAccount, User
 from backend.interview_engine import Candidate, Evidence
 from backend.max_bot import API_URL, MaxBot
 from backend.settings import Settings
@@ -29,10 +29,16 @@ def test_max_invite_and_interview(database_url, monkeypatch):
         db.flush()
         db.add(TelegramAccount(telegram_id=7, user_id=owner.id, chat_id=42))
         owner_id = owner.id
+        telegram_only = User(email="telegram-8@telegram.invalid", password_hash="unused")
+        db.add(telegram_only)
+        db.flush()
+        db.add(TelegramAccount(telegram_id=8, user_id=telegram_only.id, chat_id=84))
+        telegram_only_id = telegram_only.id
     code = create_invite(app.state.sessions, "expert@example.test")
 
     async def extract(settings, question, answer, state):
         assert state["intake"]["responsibilities"] == "Отчёты"
+        assert state["intake"]["tone"] == "business"
         return Evidence(facts=[Candidate(field="task", quote="Медленный отчёт"),
                                Candidate(field="action", quote="добавил индекс")],
                         ambiguous=[], not_applicable=[], refused=False)
@@ -81,6 +87,13 @@ def test_max_invite_and_interview(database_url, monkeypatch):
             await bot.dispatch(message(f"/start {code}", user_id=8))
             assert calls[-1][1].params["user_id"] == "8"
             assert "недействительна" in calls[-2][2]["text"]
+            await bot.dispatch(message("/profile"))
+            await bot.dispatch(callback("intake-keep-role"))
+            for _ in range(3):
+                await bot.dispatch(callback("intake-skip"))
+            assert buttons()[-3:] == ["tone:friendly", "tone:business", "tone:playful"]
+            await bot.dispatch(callback("tone:business"))
+            assert calls[-1][2]["text"] == "Анкета сохранена."
             await bot.dispatch(callback("new"))
             await bot.settle()
             finish = next(button for button in buttons() if button.startswith("finish:"))
@@ -92,6 +105,16 @@ def test_max_invite_and_interview(database_url, monkeypatch):
             await bot.settle()
             assert any("Добавлен индекс для отчёта." in body.get("text", "") for _, _, body in calls)
             assert any(url.path == "/answers" and url.params["callback_id"] == "cb" for _, url, _ in calls)
+            await bot.dispatch({"update_type": "bot_started", "user": {"user_id": 8}})
+            assert buttons()[-1] == "new"
+            with app.state.sessions() as db:
+                max_user_id = db.get(MaxAccount, 8).user_id
+            await bot.dispatch(message("/start", user_id=8))
+            assert buttons()[-1] == "new"
+            with app.state.sessions() as db:
+                assert db.get(MaxAccount, 8).user_id == max_user_id
+            await bot.dispatch(message("/new", user_id=8))
+            assert "Кем вы работаете" in calls[-1][2]["text"]
             assert all(url.params.get("user_id") in {"7", "8"} for method, url, _ in calls
                        if method == "POST" and url.path == "/messages")
         finally:
@@ -101,6 +124,11 @@ def test_max_invite_and_interview(database_url, monkeypatch):
         asyncio.run(scenario())
     with app.state.sessions() as db:
         assert db.get(MaxAccount, 7).user_id == owner_id
-        assert db.get(MaxAccount, 8) is None
+        max_user = db.get(User, db.get(MaxAccount, 8).user_id)
+        assert max_user.id != telegram_only_id
+        assert max_user.email == "max-8@max.invalid"
+        assert not max_user.is_editor
         assert db.get(TelegramAccount, 7).chat_id == 42
+        assert db.get(User, owner_id).interview_profile["tone"] == "business"
+        assert db.scalar(select(InterviewSession)).context["tone"] == "business"
         assert db.scalar(select(KnowledgeCard)).owner_id == owner_id

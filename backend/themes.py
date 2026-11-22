@@ -10,10 +10,11 @@ import json
 import math
 from collections import Counter
 
-from sqlalchemy import Float, and_, select, tuple_
+from sqlalchemy import Float, and_, case, func, select, tuple_
 from sqlalchemy.orm import aliased
 
 from backend.db import CardEmbedding, KnowledgeCard
+from backend.embeddings import case_text
 from backend.knowledge import SECTIONS, cases_of, published_cards
 from backend.taxonomy import SKILL_TAXONOMY, TAXONOMY
 from backend.vacancy_parser import skill_hits
@@ -32,7 +33,8 @@ def close_pairs(db, model, candidates, threshold):
     neighbours = {key: {} for key in keys}
     if pgvector_column(db):
         left, right = aliased(CardEmbedding), aliased(CardEmbedding)
-        score = (1 - left.embedding.op("<=>", return_type=Float)(right.embedding)).label("score")
+        score = case((func.vector_dims(left.embedding) == func.vector_dims(right.embedding),
+                      1 - left.embedding.op("<=>", return_type=Float)(right.embedding))).label("score")
         pairs = db.execute(select(left.card_id, left.case_index, right.card_id, right.case_index, score).join(
             right, and_(right.model == model, tuple_(left.card_id, left.case_index) < tuple_(right.card_id, right.case_index)),
         ).where(left.model == model, left.card_id.in_(candidates), right.card_id.in_(candidates),
@@ -44,21 +46,25 @@ def close_pairs(db, model, candidates, threshold):
                 CardEmbedding.model == model, CardEmbedding.card_id.in_(candidates)))}
         ordered = sorted(vectors)
         found = ((key, other, similarity(vectors[key], vectors[other]))
-                 for position, key in enumerate(ordered) for other in ordered[position + 1:])
+                 for position, key in enumerate(ordered) for other in ordered[position + 1:]
+                 if len(vectors[key]) == len(vectors[other]))
     for key, other, value in found:
         if value >= threshold:
             neighbours[key][other] = neighbours[other][key] = value
     return neighbours
 
 
-def star_themes(neighbours):
-    """[(leader, members)] for themes of two or more cases, leaders by most neighbours first."""
+def star_themes(neighbours, case_order):
+    """[(leader, members)], with ties broken by total similarity and case text."""
     unassigned = set(neighbours)
     themes = []
-    for leader in sorted(neighbours, key=lambda key: (-len(neighbours[key]), key)):
+    for leader in sorted(neighbours, key=lambda key: (
+        -len(neighbours[key]), -math.fsum(neighbours[key].values()), case_order[key], key,
+    )):
         if leader not in unassigned:
             continue
-        members = [leader, *sorted(other for other in neighbours[leader] if other in unassigned)]
+        members = [leader, *sorted((other for other in neighbours[leader] if other in unassigned),
+                                   key=lambda key: (case_order[key], key))]
         unassigned.difference_update(members)
         if len(members) > 1:
             themes.append((leader, members))
@@ -87,13 +93,17 @@ def catalog_themes(db, model, threshold=THEME_MIN_SCORE):
     """Themes with their cards and skills, and the theme x category correlation matrix."""
     candidates = published_cards().with_only_columns(KnowledgeCard.id)
     neighbours = close_pairs(db, model, candidates, threshold)
-    themes = star_themes(neighbours)
     contents = dict(db.execute(published_cards().with_only_columns(KnowledgeCard.id, KnowledgeCard.content)
                                .where(KnowledgeCard.id.in_({card_id for card_id, _ in neighbours}))).all())
     named = {(card_id, index): value for card_id, content in contents.items()
              for index, value in case_categories(content).items() if (card_id, index) in neighbours}
     titles = {(card_id, index): case.get("title") or contents[card_id]["title"]
               for card_id, content in contents.items() for index, case in enumerate(cases_of(content))}
+    case_order = {(card_id, index): case_text(case, SECTIONS) for card_id, content in contents.items()
+                  for index, case in enumerate(cases_of(content))}
+    neighbours = {key: {other: score for other, score in edges.items() if other in named}
+                  for key, edges in neighbours.items() if key in named}
+    themes = star_themes(neighbours, case_order)
     categories = [name for name in TAXONOMY if any(name in found for _, found in named.values())]
     rows = []
     for leader, members in themes:

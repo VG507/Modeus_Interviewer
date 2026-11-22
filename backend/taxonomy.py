@@ -12,11 +12,11 @@ OTHER = "other"
 
 TAXONOMY = {
     "languages": {
-        "general": ("python", "javascript", "typescript"),
+        "general": ("python", "javascript", "typescript", "go"),
     },
     "backend": {
         "frameworks": ("django", "fastapi", "flask"),
-        "api": ("django rest framework", "rest", "graphql"),
+        "api": ("django rest framework", "rest", "graphql", "grpc"),
         "runtimes": ("node.js",),
     },
     "frontend": {
@@ -25,11 +25,13 @@ TAXONOMY = {
     },
     "databases": {
         "sql": ("postgresql", "mysql"),
-        "nosql": ("redis",),
+        "nosql": ("redis", "mongodb"),
+        "analytics": ("clickhouse",),
+        "search": ("elasticsearch",),
         "query": ("sql",),
     },
     "messaging": {
-        "brokers": ("kafka", "rabbitmq"),
+        "brokers": ("kafka", "rabbitmq", "redis streams", "redis pub/sub"),
         "task_queues": ("celery",),
     },
     "devops": {

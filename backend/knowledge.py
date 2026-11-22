@@ -5,6 +5,7 @@ import re
 from sqlalchemy import select
 
 from backend.db import KnowledgeCard
+from backend.demo_auth import card_owners
 from backend.vacancy_context import keywords, profession_for_question
 from backend.vacancy_parser import SKILL_PATTERN, canonical_skill, overlaps_task, task_key
 from backend.vectors import SIMILAR_MIN_SCORE
@@ -66,6 +67,7 @@ def cases_of(content):
 
 def published_cards():
     return select(KnowledgeCard).where(
+        KnowledgeCard.owner_id.in_(card_owners(None)),
         KnowledgeCard.publication_status == "published", KnowledgeCard.review_status == "reviewed",
         KnowledgeCard.consent["content_version"].as_integer() == KnowledgeCard.content_version,
         KnowledgeCard.review["content_version"].as_integer() == KnowledgeCard.content_version,

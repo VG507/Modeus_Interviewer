@@ -2,6 +2,7 @@ import asyncio
 import secrets
 from contextlib import asynccontextmanager, suppress
 from datetime import timedelta
+from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -10,10 +11,12 @@ from sqlalchemy import case, delete, or_, select, update
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from backend.db import LoginSession, User, database, now
-from backend.auth import current_user, limit_login
+from backend.auth import current_user, limit_login, session_user, user_view
 from backend.card_api import router as card_router
 from backend.discovery_api import router as discovery_router
+from backend.demo_auth import create_demo_pair
 from backend.documentation import schedule_documentation
+from backend.documentation_evidence import schedule_documentation_evidence
 from backend.embeddings import configured as embeddings_configured, schedule_card_index
 from backend.github_evidence import schedule_github_evidence
 from backend.http_errors import LimitRequestBody, error_response, unhandled_error
@@ -33,6 +36,11 @@ class LoginBody(BaseModel):
     password: str = Field(min_length=1, max_length=256)
 
 
+class DemoLoginBody(BaseModel):
+    role: Literal["participant", "moderator"]
+    switch: bool = False
+
+
 def create_app(settings: Settings | None = None):
     settings = settings or Settings()
     engine, sessions = database(settings.database_url)
@@ -45,6 +53,8 @@ def create_app(settings: Settings | None = None):
             workers.append(asyncio.create_task(schedule_collections(sessions, settings)))
         if settings.documentation_weekly_enabled:
             workers.append(asyncio.create_task(schedule_documentation(sessions)))
+        if settings.llm_base_url and settings.llm_model:
+            workers.append(asyncio.create_task(schedule_documentation_evidence(sessions, settings)))
         workers.append(asyncio.create_task(schedule_github_evidence(sessions, settings)))
         if embeddings_configured(settings):
             workers.append(asyncio.create_task(schedule_card_index(sessions, settings)))
@@ -88,6 +98,16 @@ def create_app(settings: Settings | None = None):
         if request.headers.get("origin") not in app.state.app_origins:
             raise HTTPException(403, "ORIGIN_REJECTED")
 
+    def issue_session(db, user, response):
+        token = secrets.token_urlsafe(32)
+        db.add(LoginSession(token_hash=token_hash(token), user_id=user.id,
+                            expires_at=now() + timedelta(hours=settings.session_hours)))
+        db.commit()
+        response.headers["Cache-Control"] = "no-store"
+        response.set_cookie("modeus_session", token, httponly=True, secure=settings.secure_cookie,
+                            samesite="lax", path="/", max_age=settings.session_hours * 3600)
+        return user_view(user)
+
     @app.get("/api/v1/health")
     def health():
         try:
@@ -102,7 +122,7 @@ def create_app(settings: Settings | None = None):
         require_origin(request)
         limit_login(sessions, request)
         with sessions() as db:
-            user = db.scalar(select(User).where(User.email == body.email.strip().lower()))
+            user = db.scalar(select(User).where(User.email == body.email.strip().lower(), User.demo_group.is_(None)))
             stamp = now()
             if user and user.locked_until and user.locked_until > stamp:
                 raise HTTPException(429, "LOGIN_TEMPORARILY_LOCKED")
@@ -124,17 +144,43 @@ def create_app(settings: Settings | None = None):
                 raise HTTPException(401, "INVALID_CREDENTIALS")
             if not db.execute(unlocked.values(failed_logins=0, locked_until=None)).rowcount:
                 raise HTTPException(401, "INVALID_CREDENTIALS")
-            token = secrets.token_urlsafe(32)
-            db.add(LoginSession(token_hash=token_hash(token), user_id=user.id,
-                                expires_at=now() + timedelta(hours=settings.session_hours)))
-            db.commit()
-            response.set_cookie("modeus_session", token, httponly=True, secure=settings.secure_cookie,
-                                samesite="lax", path="/", max_age=settings.session_hours * 3600)
-            return {"id": user.id, "is_editor": user.is_editor}
+            return issue_session(db, user, response)
+
+    @app.get("/api/v1/auth/demo")
+    def demo_status(response: Response):
+        response.headers["Cache-Control"] = "no-store"
+        return {"enabled": settings.demo_auth_enabled}
+
+    @app.post("/api/v1/auth/demo")
+    def demo_login(body: DemoLoginBody, request: Request, response: Response):
+        if not settings.demo_auth_enabled:
+            raise HTTPException(404, "DEMO_DISABLED")
+        require_origin(request)
+        limit_login(sessions, request)
+        response.headers["Cache-Control"] = "no-store"
+        token = request.cookies.get("modeus_session")
+        moderator = body.role == "moderator"
+        with sessions() as db:
+            user = session_user(db, token, now())
+            if user and user.demo_group:
+                if user.is_editor == moderator:
+                    return user_view(user)
+                target = db.scalar(select(User).where(User.demo_group == user.demo_group, User.is_editor == moderator))
+                revoked = db.execute(delete(LoginSession).where(
+                    LoginSession.token_hash == token_hash(token),
+                ).returning(LoginSession.token_hash)).scalar()
+                if target is None or revoked is None:
+                    raise HTTPException(401, "UNAUTHENTICATED")
+                return issue_session(db, target, response)
+            if body.switch:
+                raise HTTPException(401, "UNAUTHENTICATED")
+            participant, reviewer = create_demo_pair(db)
+            return issue_session(db, reviewer if moderator else participant, response)
 
     @app.get("/api/v1/me")
-    def me(user=Depends(current_user)):
-        return user
+    def me(response: Response, user=Depends(current_user)):
+        response.headers["Cache-Control"] = "no-store"
+        return {key: value for key, value in user.items() if key != "demo_group"}
 
     @app.post("/api/v1/auth/logout", status_code=204)
     def logout(request: Request):

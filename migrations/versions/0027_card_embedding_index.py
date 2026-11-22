@@ -29,13 +29,18 @@ def vector_column(bind):
     )) == "vector"
 
 
+def create_index():
+    op.execute(f"create index if not exists {INDEX} on card_embeddings "
+               f"using hnsw ((embedding::vector({DIMENSIONS})) vector_cosine_ops) "
+               f"where model = '{MODEL}' and vector_dims(embedding) = {DIMENSIONS}")
+
+
 def upgrade():
     # This migration first shipped as a second 0026, so a database marked 0026 may lack the MAX table.
     if not op.get_context().as_sql and not sa.inspect(op.get_bind()).has_table("max_accounts"):
         import_module("migrations.versions.0026_max_accounts").upgrade()
     if vector_column(op.get_bind()):
-        op.execute(f"create index if not exists {INDEX} on card_embeddings "
-                   f"using hnsw ((embedding::vector({DIMENSIONS})) vector_cosine_ops) where model = '{MODEL}'")
+        create_index()
 
 
 def downgrade():

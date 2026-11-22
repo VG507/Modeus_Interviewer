@@ -28,10 +28,12 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(254), unique=True)
     password_hash: Mapped[str] = mapped_column(String(256))
     is_editor: Mapped[bool] = mapped_column(Boolean, default=False)
+    demo_group: Mapped[str | None] = mapped_column(String(36))
     failed_logins: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     interview_profile: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
+    __table_args__ = (Index("ix_users_demo_group_role", "demo_group", "is_editor", unique=True),)
 
 
 class LoginSession(Base):

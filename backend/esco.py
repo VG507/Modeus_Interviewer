@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 import httpx
 
 from backend.db import EscoProfile, VacancyCollection
+from backend.discovery_fetch import DNS_ERROR, is_dns_failure
 from backend.textnorm import SKILL_ALIASES, clean_key
 from backend.vacancy_context import profession_for_question
 from backend.vacancy_parser import plain
@@ -90,8 +91,8 @@ def get_json(client, path, deadline, **params):
         raise EscoError("ESCO_TIMEOUT") from None
     except httpx.DecodingError:
         raise EscoError("ESCO_INVALID_RESPONSE") from None
-    except httpx.HTTPError:
-        raise EscoError("ESCO_UNAVAILABLE") from None
+    except httpx.HTTPError as exc:
+        raise EscoError(DNS_ERROR if is_dns_failure(exc) else "ESCO_UNAVAILABLE") from None
     except (ValueError, RecursionError):
         raise EscoError("ESCO_INVALID_RESPONSE") from None
     if not isinstance(result, dict):

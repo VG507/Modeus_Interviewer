@@ -13,6 +13,7 @@ from backend.app import create_app
 from backend.db import CardEmbedding, InterviewSession, KnowledgeCard, User, VacancyCollection, database, now
 from backend.knowledge import published_cards, published_context
 from backend.settings import Settings
+from backend.themes import close_pairs
 from backend.vacancy_context import sources_for_question
 from backend.vacancy_import import prepare_cards
 from tests.test_vacancies import vacancy
@@ -282,12 +283,21 @@ def test_themes_group_close_cases_and_correlate_with_categories(database_url, mo
 
 def test_search_query_can_use_the_hnsw_index(database_url, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", database_url)
-    command.upgrade(Config("alembic.ini"), "head")
+    config = Config("alembic.ini")
+    command.upgrade(config, "0029")
     engine, sessions = database(database_url)
     try:
-        with sessions() as db:
+        with sessions.begin() as db:
             if not vectors.pgvector_column(db):
                 pytest.skip("the index exists only on PostgreSQL with pgvector")
+            # Reproduce the index definition already deployed before 0030.
+            db.execute(text("drop index card_embeddings_bge_m3_hnsw"))
+            db.execute(text("create index card_embeddings_bge_m3_hnsw on card_embeddings "
+                            "using hnsw ((embedding::vector(1024)) vector_cosine_ops) where model = 'bge-m3'"))
+        command.upgrade(config, "head")
+        with sessions() as db:
+            definition = db.scalar(text("select pg_get_indexdef('card_embeddings_bge_m3_hnsw'::regclass)"))
+            assert "vector_dims(embedding) = 1024" in definition
             statement = embeddings.nearest_cases_statement(
                 "bge-m3", [0.01] * 1024, published_cards().with_only_columns(KnowledgeCard.id), 50)
             compiled = statement.compile(dialect=db.get_bind().dialect, compile_kwargs={"render_postcompile": True})
@@ -297,3 +307,33 @@ def test_search_query_can_use_the_hnsw_index(database_url, monkeypatch):
     finally:
         engine.dispose()
     assert "Index Scan using card_embeddings_bge_m3_hnsw" in plan
+
+
+def test_vector_search_and_themes_handle_mixed_dimensions(database_url, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    command.upgrade(Config("alembic.ini"), "head")
+    engine, sessions = database(database_url)
+    try:
+        names = ("match", "related", "different size", "alternative")
+        ids = publish(sessions, {name: content(name, "Задача", "Действие") for name in names})
+        primary = [1.0] + [0.0] * 1023
+        alternative = [1.0] + [0.0] * 767
+        with sessions.begin() as db:
+            for name, model, vector in zip(names, ("bge-m3", "bge-m3", "bge-m3", "nomic-embed-text"),
+                                           (primary, primary, alternative, alternative)):
+                db.add(CardEmbedding(card_id=ids[name], case_index=0, model=model, text_hash="hash",
+                                     embedding=vectors.stored_vector(db, vector)))
+        with sessions() as db:
+            candidates = published_cards().with_only_columns(KnowledgeCard.id)
+            hits = embeddings.nearest_cases(db, "bge-m3", primary, candidates, 10)
+            assert {(card_id, score) for card_id, _, score in hits} == {
+                (ids["match"], 1.0), (ids["related"], 1.0),
+            }
+            assert embeddings.nearest_cases(db, "nomic-embed-text", alternative, candidates, 10) == [
+                (ids["alternative"], 0, 1.0),
+            ]
+            neighbours = close_pairs(db, "bge-m3", candidates, 0.64)
+            assert neighbours[(ids["different size"], 0)] == {}
+            assert neighbours[(ids["match"], 0)] == {(ids["related"], 0): 1.0}
+    finally:
+        engine.dispose()

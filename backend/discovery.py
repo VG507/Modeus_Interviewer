@@ -25,7 +25,7 @@ from backend.vacancy_samples import trudvsem_samples
 
 DEFAULT_REPOS = ("sqlalchemy/sqlalchemy", "celery/celery")
 DEFAULT_TOPICS = ("llm", "rag", "vector-database")
-ACTIVE_PROVIDERS = ("github", "trends", "docs", "openalex", "skills")
+ACTIVE_PROVIDERS = ("github", "trends", "docs", "openalex", "skills", "habr")
 
 
 class InvalidDiscoveryQuery(CollectionError):
@@ -55,6 +55,8 @@ def item_digest(item):
     if item.id.startswith("skills:"):
         evidence.pop("commit", None)
         source = item.id
+    if item.id.startswith("habr:"):
+        evidence.pop("rating", None)
     return hashlib.sha256(json.dumps([item.title, source, evidence], sort_keys=True).encode()).hexdigest()
 
 
@@ -65,7 +67,7 @@ def collect_records(db, provider, profession, items, observed_at):
         replace = DiscoveryItem.observed_at <= observed_at
         insert_row(db, DiscoveryItem, {"id": item.id, "provider": provider, **state}, ["id"],
                    changes=state, condition=replace)
-        if provider in {"github", "trends", "openalex", "skills"}:
+        if provider in {"github", "trends", "openalex", "skills", "habr"}:
             insert_row(db, DiscoveryRevision, {"item_id": item.id, **state}, ["item_id", "digest"])
         insert_row(db, DiscoveryCandidate, {"item_id": item.id, "profession_id": profession,
                                             "status": "observe" if provider == "trends" else "new"},
@@ -198,6 +200,9 @@ def candidate_output(db, item, candidate, *, include_text=False):
               "observed_at": item.observed_at.isoformat() + "Z",
               "digest": item.digest, "status": status, "reason": reason,
               "assessment": candidate.assessment if candidate.reviewed_digest == item.digest else None}
+    if item.provider == "docs":
+        output["unreviewed_revision"] = (item.payload.get("kind") == "documentation" and not item.payload.get("reason")
+                                         and candidate.reviewed_digest != item.digest)
     if item.provider == "trends":
         observed = item.observed_at.date()
         target = (observed - timedelta(days=7)).isoformat()
@@ -252,17 +257,27 @@ def list_candidates(db, profession, limit, *, provider=None, offset=0):
     return [candidate_output(db, item, candidate) for item, candidate in rows]
 
 
-def save_documentation_review(db, profession, item_id, digest, status, reason, *, evidence=None):
+def save_documentation_review(db, profession, item_id, digest, status, reason, *, evidence=None, automatic_lease=None):
     item, candidate = item_entry(db, profession, item_id)
     if item is None or candidate is None or item.provider != "docs" or item.digest != digest:
         raise CollectionError("Candidate revision changed or is unavailable")
-    values = {"status": status, "reason": reason, "reviewed_digest": digest, "assessment": None}
+    values = {"status": status, "reason": reason, "reviewed_digest": digest, "assessment": None, "retry_at": None}
     db.execute(update(VacancyCollection).where(VacancyCollection.profession_id == profession)
                .values(profession_id=VacancyCollection.profession_id))
     # Serialize this decision with collection's update of the current source revision.
     if not db.execute(update(DiscoveryItem).where(DiscoveryItem.id == item_id, DiscoveryItem.digest == digest)
                       .values(digest=digest)).rowcount:
         raise CollectionError("Редакция источника изменилась. Загрузите её заново.")
+    statement = update(DiscoveryCandidate).where(
+        DiscoveryCandidate.item_id == item_id, DiscoveryCandidate.profession_id == profession,
+    )
+    if automatic_lease is not None:
+        if db.get(DocumentationSubscription, (item.payload["watch_id"], profession)) is None:
+            return
+        if not db.execute(statement.where(
+            DiscoveryCandidate.retry_at == automatic_lease, DiscoveryCandidate.retry_at > now(),
+        ).values(retry_at=None)).rowcount:
+            return
     if status == "accepted":
         reviewed = approved_documentation(db, item, profession, evidence)
         import_excerpts(db, [reviewed.model_dump()])
@@ -275,9 +290,9 @@ def save_documentation_review(db, profession, item_id, digest, status, reason, *
             until = checked.replace(year=year, day=28)
         values.update(excerpt_id=reviewed.id, valid_until=until,
                       assessment={"checked_at": checked.isoformat() + "Z"})
-    db.execute(update(DiscoveryCandidate).where(
-        DiscoveryCandidate.item_id == item_id, DiscoveryCandidate.profession_id == profession,
-    ).values(**values))
+        if automatic_lease is not None:
+            values["assessment"].update(automatic=True, **evidence)
+    db.execute(statement.values(**values))
 
 
 def approved_documentation(db, item, profession, evidence):

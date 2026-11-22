@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import socket
 from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -12,18 +13,20 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
 from backend import agent_skills, discovery, documentation, esco, github_evidence, interview_engine, interview_worker
-from backend import openalex, profession_collection
+from backend import documentation_evidence, openalex, profession_collection
 from backend import discovery_api
 from backend.app import create_app
 from backend.auth import current_user
 from backend.db import (
     DocumentationRevision, DiscoveryCandidate, DiscoveryItem, DiscoveryRevision, RepositoryObservation,
-    InterviewSession, KnowledgeCard, Message, Source, SourceExcerpt, User, VacancyCollection, database, now,
+    InterviewSession, KnowledgeCard, Message, ProfessionCollectionRun, Source, SourceExcerpt, User, VacancyCollection,
+    database, now,
 )
 from backend.discovery_fetch import (
     Collected, CollectionError, ProviderRateLimit, fetch, github_issues, repository_trends,
 )
 from backend.settings import Settings
+from backend.vacancy_samples import trudvsem_samples
 from backend.interview_api import message_view
 from backend.interview_schemas import CaseState
 from backend.knowledge import fact_skills, prior_case_context
@@ -144,7 +147,7 @@ def test_agent_skill_trace_from_github_to_question_answer_and_card(sessions, mon
         assert sources_for_followup(db, interview.context, state, "verification", verification) == []
         interview_worker.queue(interview, "question", intent="verification", answer_id=first.id)
 
-    async def question_model(settings, schema, instructions, payload, check=None):
+    async def question_model(settings, schema, instructions, payload, check=None, *, cache_scope=None):
         assert payload["market_context"][0]["task_excerpt"] == verification
         assert payload["market_context"][0]["provider"] == "skills"
         return schema(text="Как вы проверяли результат взаимодействия до и после действия?", source_number=1)
@@ -196,7 +199,7 @@ def test_agent_skill_trace_from_github_to_question_answer_and_card(sessions, mon
         assert sources_for_followup(db, {"role": "QA Engineer"}, state, "verification") == []
     invalid_fragment = False
     assert collect()["accepted"] == 1
-    async def change_skill_during_generation(settings, schema, instructions, payload, check=None):
+    async def change_skill_during_generation(settings, schema, instructions, payload, check=None, *, cache_scope=None):
         with sessions.begin() as db:
             candidate = db.get(DiscoveryCandidate, (trace["item_id"], "qa"))
             candidate.valid_until = now() - timedelta(seconds=1)
@@ -271,7 +274,7 @@ def test_only_current_published_card_gaps_reach_question_and_unpublish_invalidat
     model_contexts = []
     unpublish = False
 
-    async def model(settings, schema, instructions, payload, check=None):
+    async def model(settings, schema, instructions, payload, check=None, *, cache_scope=None):
         model_contexts.append(payload.get("knowledge_gaps"))
         assert "PRIVATE_SENTINEL" not in str(payload)
         if unpublish:
@@ -558,6 +561,52 @@ def test_profession_collection_can_retry_only_failed_source(sessions, monkeypatc
             assert rejected.json()["error"]["code"] == "COLLECTION_RETRY_UNAVAILABLE"
         assert client.get(path).json()["run"] == complete
         assert len(calls) == len(profession_collection.SOURCES) + 1
+
+
+def test_common_collection_waits_for_saved_vacancies_and_preserves_other_steps(sessions, monkeypatch):
+    profession = "python_backend"
+    cards = [{"tasks": ["Investigate slow SQL queries"]}]
+
+    def refresh(_, settings, profile, source):
+        if source == "hh":
+            try:
+                raise socket.gaierror("DNS failure")
+            except socket.gaierror:
+                raise httpx.ConnectError("Could not resolve source") from None
+        if source == "trudvsem":
+            return {"status": "ok", "collected": 1, "sample": (cards, {
+                "source": "trudvsem", "config_version": 1, "vacancies": 1, "employers": 1,
+            })}
+        if source in {"hn", "openalex"}:
+            with sessions() as db:
+                assert trudvsem_samples(db, profile)[profile].cards == cards
+        return {"status": "skipped", "code": "DOCS_NOT_CONFIGURED"} if source == "docs" else {"status": "ok"}
+
+    settings = Settings()
+    monkeypatch.setattr(profession_collection, "refresh_source", refresh)
+    with sessions.begin() as db:
+        _, token = profession_collection.start(db, profession)
+        _, duplicate = profession_collection.start(db, profession)
+        assert duplicate is None
+    profession_collection.refresh_sources(sessions, settings, profession, token)
+    with sessions.begin() as db:
+        completed = profession_collection.output(db.get(ProfessionCollectionRun, profession))
+        assert completed["steps"]["hh"]["code"] == "DISCOVERY_DNS_FAILED"
+        assert completed["steps"]["hn"]["status"] == completed["steps"]["openalex"]["status"] == "ok"
+        assert completed["steps"]["docs"]["status"] == "skipped"
+        retry, retry_token = profession_collection.start(db, profession, token, "docs")
+        assert retry["steps"]["docs"]["status"] == "queued"
+    profession_collection.refresh_sources(sessions, settings, profession, retry_token, "docs")
+    with sessions.begin() as db:
+        esco_only, esco_token = profession_collection.start(db, profession, only="esco")
+        assert esco_only["steps"] == {**completed["steps"], "esco": {"status": "queued"}}
+        db.get(ProfessionCollectionRun, profession).lease_until = now() - timedelta(seconds=1)
+    with sessions.begin() as db:
+        interrupted = profession_collection.output(db.get(ProfessionCollectionRun, profession))
+        assert not interrupted["running"]
+        assert interrupted["steps"]["esco"]["status"] == "interrupted"
+        resumed, resumed_token = profession_collection.start(db, profession, esco_token, "esco")
+        assert resumed_token and resumed["steps"]["hn"] == completed["steps"]["hn"]
 
 
 def test_esco_collection_from_hal_to_editor_and_interview(sessions, monkeypatch):
@@ -874,6 +923,52 @@ def test_automatic_check_cannot_publish_a_superseded_issue(sessions):
         assert db.scalar(select(func.count()).select_from(SourceExcerpt)) == 0
 
 
+def test_automatic_documentation_review_checks_quotes_and_respects_manual_decision(sessions, monkeypatch):
+    profession, watch = "python_backend", "postgresql-explain"
+    url = TARGETS[watch].url
+    text = "EXPLAIN ANALYZE displays actual execution times."
+    with sessions.begin() as db:
+        documentation.configure_watches(db, profession, [watch])
+    token = documentation.claim_watch(sessions, watch, None)
+    documentation.finish_watch(sessions, watch, token, {
+        "a": ("A", url, {"text": text, "version": "16", "supported": True}),
+        "b": ("B", url, {"text": text, "version": "16", "supported": True}),
+        "c": ("C", url, {"text": text, "version": "16", "supported": False}),
+        "d": ("D", url, {"text": text, "version": "16", "supported": True}),
+    }, None)
+    calls = []
+
+    async def complete(_settings, _name, _schema, _instructions, payload, **__):
+        calls.append(1)
+        return {"relevant": True, "task": "Проверить время выполнения запроса",
+                "quote": text if payload["section"] != "D" else "A fabricated quote about actual execution times.",
+                "detail": "actual execution times", "conditions": []}
+
+    # A manual decision made after an automatic claim must win.
+    lease = now() + timedelta(minutes=1)
+    with sessions.begin() as db:
+        item = db.scalar(select(DiscoveryItem).where(DiscoveryItem.title == "A"))
+        db.get(DiscoveryCandidate, (item.id, profession)).retry_at = lease
+        db.expunge(item)
+    with sessions.begin() as db:
+        discovery.save_documentation_review(db, profession, item.id, item.digest, "rejected", "Решение модератора")
+    documentation_evidence.save_documentation_assessment(
+        sessions, item, profession, lease, {"task": "Проверить время выполнения запроса", "quote": text,
+                                            "detail": "actual execution times", "conditions": []},
+    )
+    monkeypatch.setattr(documentation_evidence, "structured_completion", complete)
+    settings = Settings(llm_base_url="http://model.example", llm_model="test")
+    asyncio.run(documentation_evidence.process_documentation(sessions, settings))
+    asyncio.run(documentation_evidence.process_documentation(sessions, settings))
+    assert calls == [1, 1]
+    with sessions() as db:
+        candidates = list(db.scalars(select(DiscoveryCandidate)))
+        assert sorted(record.status for record in candidates) == ["accepted", "rejected", "review", "review"]
+        accepted = next(record for record in candidates if record.status == "accepted")
+        assert accepted.assessment["automatic"] is True
+        assert db.get(SourceExcerpt, accepted.excerpt_id).quote == text
+
+
 def test_documentation_refresh_review_and_invalidation(sessions, monkeypatch):
     main = "EXPLAIN ANALYZE reports actual execution time."
     child = "Compare actual rows with planner estimates."
@@ -933,6 +1028,8 @@ def test_documentation_refresh_review_and_invalidation(sessions, monkeypatch):
             return response.json()
 
         assert refresh()["changed"] == 2
+        quality_url = f"{endpoint}/collection/python_backend"
+        assert client.get(quality_url).json()["quality"]["documentation_pending"] == 2
         items = client.get(endpoint, params={**profile, "provider": "docs"}).json()["items"]
         root = next(item for item in items if item["title"] == "Using EXPLAIN")
         detail_url = f"{endpoint}/items/{root['id']}"
@@ -948,6 +1045,7 @@ def test_documentation_refresh_review_and_invalidation(sessions, monkeypatch):
         response = client.post(review_url, headers=headers, json=review)
         assert response.status_code == 200, response.text
         assert response.json()["status"] == "accepted"
+        assert client.get(quality_url).json()["quality"]["documentation_pending"] == 1
 
         banner = "New navigation theme"
         assert refresh()["changed"] == 0
@@ -976,6 +1074,7 @@ def test_documentation_refresh_review_and_invalidation(sessions, monkeypatch):
         assert client.post(review_url, headers=headers, json=review).json()["status"] == "accepted"
         assert client.put(docs, headers=headers, json={**profile, "targets": []}).status_code == 200
         assert client.post(review_url, headers=headers, json=review).status_code == 422
+        assert client.get(quality_url).json()["quality"]["documentation_pending"] == 0
         with sessions() as db:
             assert not sources_for_followup(db, intake, state, "verification")
     assert set(calls) == {TARGETS["postgresql-explain"].url, TARGETS["postgresql-releases"].url}

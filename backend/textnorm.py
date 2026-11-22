@@ -25,15 +25,20 @@ SKILL_ALIASES = {
     "django": ("django framework", "django", "джанго"),
     "django rest framework": ("django rest framework", "drf"),
     "rest": ("rest api", "restful api", "rest"),
+    "go": ("golang", "go language", "язык go", "языке go", "на go"),
+    "mongodb": ("mongodb", "mongo"),
+    "redis streams": ("redis streams", "redis stream"),
+    "redis pub/sub": ("redis pub/sub", "redis pubsub"),
     **{name: (name,) for name in (
         "sql", "fastapi", "flask", "redis", "docker", "git", "graphql", "pytest",
         "selenium", "playwright", "cypress", "postman", "linux", "ansible", "terraform", "helm",
         "prometheus", "grafana", "nginx", "kafka", "rabbitmq", "celery", "mysql",
+        "clickhouse", "grpc", "elasticsearch",
     )},
 }
 ALIASES = {alias: skill for skill, aliases in SKILL_ALIASES.items() for alias in aliases}
 # Fine as a whole skill label, too ambiguous to search for in free text ("node pool").
-LABEL_ALIASES = {"node": "node.js", "нода": "node.js", "golang": "go"}
+LABEL_ALIASES = {"node": "node.js", "нода": "node.js", "go": "go"}
 LABELS = {**ALIASES, **LABEL_ALIASES}
 
 # Generic words and locations that are not skills; dropped on normalization.

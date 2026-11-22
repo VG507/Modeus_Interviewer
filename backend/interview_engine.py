@@ -145,7 +145,7 @@ SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+|\n+")
 ANSWER_BATCH_SIZE = 3200
 
 
-async def ask_model(settings, schema, instructions, payload, check=None):
+async def ask_model(settings, schema, instructions, payload, check=None, *, cache_scope=None):
     """A validated model answer; check rejects answers that do not fit the request, so they are not cached."""
     def parse(raw):
         result = schema.model_validate(raw)
@@ -155,6 +155,7 @@ async def ask_model(settings, schema, instructions, payload, check=None):
 
     return await structured_completion(
         settings, schema.__name__, schema.model_json_schema(), instructions, payload, parse=parse,
+        cache_scope=cache_scope, cache=cache_scope is not None,
     )
 
 
@@ -284,7 +285,7 @@ async def extract_batch(settings, question, text, state):
                                             **prompt_context(state),
                                             "case_anchor": [anchor[:180] for anchor in case], "sentences": [
         {"number": number, "text": sentence} for number, sentence in eligible.items()
-    ]}, check=known_sentences)
+    ]}, check=known_sentences, cache_scope=state.get("llm_cache_scope"))
     if result.refused:
         return Evidence(facts=[], ambiguous=[], not_applicable=[], refused=True)
     # With no anchored episode, a bare reaction is insufficient evidence for a topic.
@@ -688,10 +689,10 @@ def choose_intent(state, *, refused=False, needs_rephrase=False):
     return None
 
 
-async def ask_question(settings, schema, instructions, payload):
+async def ask_question(settings, schema, instructions, payload, *, cache_scope=None):
     """A model question, or None when the reply is malformed and the fixed question is asked instead."""
     try:
-        return await ask_model(settings, schema, instructions, payload)
+        return await ask_model(settings, schema, instructions, payload, cache_scope=cache_scope)
     except ValidationError:
         return None
     except RuntimeError as exc:
@@ -746,7 +747,7 @@ async def draft_question(settings, topic, intent, answer, state):
         "не подтверждает, что собеседник им владеет или применил его."
     ) if state.get("esco_skills") else ""
     tone_reminder = f" {TONE_REMINDERS[tone]} Пример не копируй." if tone in TONE_REMINDERS else ""
-    result = await ask_question(settings, SourcedQuestion if include_market else Question, (
+    instructions = (
         TONES[tone]
         + " Задай один короткий вопрос по указанной цели: одно предложение, "
         "не длиннее 15 слов, вопросительный знак в самом конце. Назови в вопросе предмет случая из рассказа, "
@@ -771,10 +772,14 @@ async def draft_question(settings, topic, intent, answer, state):
         "случаю, прежде чем исходить из этих условий. knowledge_gaps указывает, какой аспект похожего опыта "
         "стоит уточнить. conditions_to_clarify — возможные условия для уточнения, если они уместны. "
         "Спроси только о текущем случае. Не пересказывай чужой опыт и не подсказывай решение."
-    ) + market_instructions + esco_instructions + tone_reminder, {"topic": topic, "goal": goal, "answer": excerpt, "facts": facts,
-                             **{key: state[key] for key in ("prior_project_context", "knowledge_gaps", "esco_skills")
-                                if key in state},
-                             **({"market_context": market_context} if include_market else {}), **prompt_context(state)})
+    ) + market_instructions + esco_instructions + tone_reminder
+    payload = {"topic": topic, "goal": goal, "answer": excerpt, "facts": facts,
+               **{key: state[key] for key in ("prior_project_context", "knowledge_gaps", "esco_skills") if key in state}}
+    if include_market:
+        payload["market_context"] = market_context
+    payload.update(prompt_context(state))
+    result = await ask_question(settings, SourcedQuestion if include_market else Question, instructions, payload,
+                                cache_scope=state.get("llm_cache_scope"))
     if (result is not None and result.text.endswith("?") and result.text.count("?") == 1
             and "\n" not in result.text and len(result.text) <= QUESTION_LIMIT
             and len(SENTENCE_END.findall(result.text)) <= 1 and "Вопрос:" not in result.text

@@ -73,15 +73,18 @@ function ProfileForm({ profile, catalog, busy, onSave, onCancel }: {
             maxLength={1000} rows={3} placeholder="Например, разрабатываю API и разбираю сбои в оплате" />
         </div>
         <div>
-          <label htmlFor="profile-tone">Как интервьюеру с вами говорить?</label>
+          <label htmlFor="profile-tone">В каком тоне ваш интервьюер будет задавать вопросы?</label>
           <select id="profile-tone" name="tone" defaultValue={profile?.tone ?? 'friendly'}>
             {Object.entries(tones).map(([value, title]) => <option key={value} value={value}>{title}</option>)}
           </select>
         </div>
         <div>
-          <label htmlFor="profile-conditions">Что важно знать о вашей работе?</label>
+          <label htmlFor="profile-conditions">В каких условиях вы работаете? <span>Необязательно</span></label>
+          <p className="meta" id="profile-conditions-hint">В одном-двух предложениях расскажите, над каким продуктом вы работаете,
+            как устроена команда или какие ограничения влияют на ваши решения.</p>
           <textarea id="profile-conditions" name="conditions" defaultValue={profile?.conditions} maxLength={1000}
-            rows={3} placeholder="Например, работаю в команде из пяти человек, сервис должен быть доступен круглосуточно" />
+            aria-describedby="profile-conditions-hint" rows={3}
+            placeholder="Например, в команде из пяти человек развиваем сервис оплаты. Обновления выпускаем без остановки сервиса." />
         </div>
       </div>
       <details className="interview-projects" open={projects.length ? true : undefined}>

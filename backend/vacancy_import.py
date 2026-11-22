@@ -14,13 +14,16 @@ from sqlalchemy.orm import load_only
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend.db import HeadHunterRequestWindow, VacancyCollection, VacancySnapshot, now
-from backend.vacancy_parser import PROFILES, identity, parse_vacancy
+from backend.discovery_fetch import DNS_ERROR, is_dns_failure
+from backend.settings import MAX_VACANCY_SAMPLE_LIMIT
+from backend.vacancy_samples import vacancy_review
+from backend.vacancy_parser import PROFILES, identity, parse_vacancy, role_key, vacancy_preset, vacancy_title_candidate
 
 logger = logging.getLogger(__name__)
 REQUEST_INTERVAL = timedelta(milliseconds=334)
 RUN_TIMEOUT = timedelta(hours=1)
 RUN_LEASE = timedelta(minutes=5)
-SAMPLE_SIZE = 50
+PAGE_SIZE = 100
 PERIOD_DAYS = 30
 DETAILS_TTL = timedelta(hours=24)
 
@@ -52,8 +55,9 @@ class HeadHunter:
             error = "HH_UNAVAILABLE"
             try:
                 response = self.client.request(method, path, **kwargs)
-            except httpx.RequestError:
-                pass
+            except httpx.RequestError as exc:
+                if is_dns_failure(exc):
+                    raise ImportFailure(DNS_ERROR) from None
             else:
                 if response.is_success:
                     body = response.json()
@@ -77,14 +81,17 @@ class HeadHunter:
                 break
         raise ImportFailure(error)
 
-    def vacancies(self, profession_id, areas, progress=None, search_query=None):
+    def vacancies(self, profession_id, areas, progress=None, search_query=None, profile=None):
+        if (profile is not None and vacancy_preset(profession_id, profile) == "ml_engineer"
+                and role_key(search_query or "") == role_key(profile.title)):
+            search_query = PROFILES["ml_engineer"][1]
         seen = set()
         for page in range(10):
             if progress:
                 progress.report("search")
             result = self.request("GET", "/vacancies", params={
                 "text": search_query or PROFILES[profession_id][1], "area": areas, "period": PERIOD_DAYS,
-                "page": page, "per_page": 50, "order_by": "publication_time",
+                "page": page, "per_page": PAGE_SIZE, "order_by": "publication_time",
             })
             for teaser in result["items"]:
                 external_id, url = identity(teaser)
@@ -92,6 +99,9 @@ class HeadHunter:
                     continue
                 seen.add(url)
                 if teaser.get("archived") is True:
+                    continue
+                title = teaser.get("name")
+                if isinstance(title, str) and title.strip() and not vacancy_title_candidate(profession_id, title, profile):
                     continue
                 if progress:
                     progress.report("details")
@@ -140,11 +150,11 @@ def wait_for_request_window(sessions, deadline):
 
 
 class CollectionProgress:
-    def __init__(self, sessions, profession_id, token):
+    def __init__(self, sessions, profession_id, token, target=MAX_VACANCY_SAMPLE_LIMIT):
         self.sessions = sessions
         self.profession_id = profession_id
         self.token = token
-        self.state = {"stage": "queued", "accepted": 0, "details_fetched": 0, "details_reused": 0, "target": SAMPLE_SIZE}
+        self.state = {"stage": "queued", "accepted": 0, "details_fetched": 0, "details_reused": 0, "target": target}
         self.last_report_at = float("-inf")
 
     def report(self, stage, **counts):
@@ -181,14 +191,15 @@ def live_cards(sessions, settings, profile, progress):
         })["access_token"]
         client.headers["Authorization"] = f"Bearer {token}"
         profession_id = profile.profession_id
-        cards = prepare_cards(hh.vacancies(profession_id, areas, progress, profile.search_query), profession_id,
-                              on_card=lambda count: progress.report("details", accepted=count), profile=profile)
+        cards = prepare_cards(hh.vacancies(profession_id, areas, progress, profile.search_query, profile), profession_id,
+                              on_card=lambda count: progress.report("details", accepted=count), profile=profile,
+                              limit=settings.vacancy_sample_limit)
         details_cache = {card["id"]: hh.details[card["id"]] for card in cards}
         stats = {"details_fetched": hh.details_fetched, "details_reused": hh.details_reused}
         return cards, details_cache, stats
 
 
-def prepare_cards(items, profession_id, on_card=None, profile=None):
+def prepare_cards(items, profession_id, on_card=None, profile=None, *, limit=MAX_VACANCY_SAMPLE_LIMIT):
     cards = {}
     for item in items:
         card = parse_vacancy(item, profession_id, profile)
@@ -196,7 +207,7 @@ def prepare_cards(items, profession_id, on_card=None, profile=None):
             cards[card["id"]] = card
             if on_card:
                 on_card(len(cards))
-        if len(cards) >= SAMPLE_SIZE:
+        if len(cards) >= limit:
             break
     if not cards:
         raise ImportFailure("HH_EMPTY_SAMPLE")
@@ -229,7 +240,7 @@ def claim_collection(sessions, profession_id, scheduled_since=None):
 
 
 def run_collection(sessions, settings, profession_id, token, fixture=None):
-    progress = CollectionProgress(sessions, profession_id, token)
+    progress = CollectionProgress(sessions, profession_id, token, settings.vacancy_sample_limit)
     with sessions() as db:
         profile = db.get(VacancyCollection, profession_id, options=[load_only(
             VacancyCollection.title, VacancyCollection.search_query, VacancyCollection.aliases,
@@ -243,7 +254,7 @@ def run_collection(sessions, settings, profession_id, token, fixture=None):
         else:
             progress.report("file")
             items = json.loads(fixture.read_text(encoding="utf-8-sig"))
-            cards = prepare_cards(items, profession_id, profile=profile)
+            cards = prepare_cards(items, profession_id, profile=profile, limit=settings.vacancy_sample_limit)
             details_cache, transfer_stats = None, {}
         stats = {**sample_stats(cards, working_areas(settings) if fixture is None else None), **transfer_stats,
                  "config_version": profile.config_version}
@@ -255,13 +266,16 @@ def run_collection(sessions, settings, profession_id, token, fixture=None):
     else:
         collected = now()
         with sessions.begin() as db:
-            changed = db.execute(update(VacancyCollection).where(
+            row = db.execute(update(VacancyCollection).where(
                 VacancyCollection.profession_id == profession_id, VacancyCollection.run_id == token,
                 VacancyCollection.lease_until > collected,
             ).values(cards=cards, stats=stats, details_cache=details_cache, updated_at=collected,
-                     run_id=None, lease_until=None, progress=None)).rowcount
-            if not changed:
+                     run_id=None, lease_until=None, progress=None).returning(VacancyCollection.approved)).first()
+            if row is None:
                 return {"status": "superseded"}
+            if fixture is None:
+                stats = {**stats, "review": vacancy_review(cards, row.approved)}
+                db.get(VacancyCollection, profession_id).stats = stats
             db.add(VacancySnapshot(id=token, profession_id=profession_id, collected_at=collected, stats=stats, cards=cards))
         return {"status": "ok", **stats}
     with sessions.begin() as db:

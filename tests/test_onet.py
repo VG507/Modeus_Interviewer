@@ -59,8 +59,9 @@ def test_onet_batch_import_and_failed_refresh(database_url, monkeypatch, tmp_pat
     try:
         status = onet.import_tasks(sessions)
         assert collected == [onet.STATEMENTS, onet.RATINGS]
-        assert set(status["profiles"]) == onet.OCCUPATIONS.keys()
-        assert all(row["tasks"] == 3 for row in status["profiles"].values())
+        assert set(status["profiles"]) == onet.OCCUPATIONS.keys() | {"ml_engineer"}
+        assert all(status["profiles"][key]["tasks"] == 3 for key in onet.OCCUPATIONS)
+        assert status["profiles"]["ml_engineer"]["tasks"] == 1
         request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(sessions=sessions)))
         output = onet_profile(request, {"is_editor": True}, "python_backend")
         assert [row["importance"] for row in output["tasks"]] == [4.2, None, 4.9]
@@ -68,7 +69,7 @@ def test_onet_batch_import_and_failed_refresh(database_url, monkeypatch, tmp_pat
         assert output["tasks"][0]["example_ru"]
 
         with sessions.begin() as db:
-            db.add(VacancyCollection(profession_id="custom_ml", title="ML-инженер", title_key="ml инженер"))
+            db.add(VacancyCollection(profession_id="custom_ml", title="Machine Learning Engineer", title_key="machine learning engineer"))
         assert onet.import_tasks(sessions, directory=tmp_path)["profiles"]["custom_ml"]["code"] == onet.ML_CODE
         ml = onet_profile(request, {"is_editor": True}, "custom_ml")
         assert ml["tasks"][0]["importance"] == 4.6 and ml["tasks"][0]["example_ru"]
@@ -80,6 +81,6 @@ def test_onet_batch_import_and_failed_refresh(database_url, monkeypatch, tmp_pat
             onet.import_tasks(sessions, directory=tmp_path)
         assert onet_profile(request, {"is_editor": True}, "python_backend") == output
         with sessions() as db:
-            assert len(db.scalars(select(OnetProfile)).all()) == 5
+            assert len(db.scalars(select(OnetProfile)).all()) == 6
     finally:
         engine.dispose()

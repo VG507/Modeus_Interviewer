@@ -16,7 +16,7 @@ from backend.interview_api import Actor, utc
 from backend.taxonomy import skill_breakdown
 from backend.vacancy_import import claim_collection, collection_available, configured, run_collection
 from backend.vacancy_parser import profile_matches, role_key
-from backend.vacancy_samples import FRESH_FOR, current_sample, sample_is_fresh, trudvsem_samples
+from backend.vacancy_samples import FRESH_FOR, current_sample, pending_review, sample_is_fresh, trudvsem_samples
 
 router = APIRouter(prefix="/api/v1/vacancies")
 Experience = Literal["noExperience", "between1And3", "between3And6", "moreThan6"]
@@ -41,7 +41,7 @@ class ProfileReview(BaseModel):
 
 
 def require_editor(actor):
-    if not actor["is_editor"]:
+    if not actor["is_editor"] or actor.get("is_demo"):
         raise HTTPException(403, "EDITOR_REQUIRED")
 
 
@@ -70,27 +70,31 @@ def collection_status(collection, current):
 
 
 @router.get("/overview")
-def overview(request: Request, actor: Actor):
+def overview(request: Request, actor: Actor, profession_id: str | None = None):
     require_editor(actor)
     with request.app.state.sessions() as db:
-        samples = trudvsem_samples(db, include_cards=False)
-        rows = db.scalars(select(VacancyCollection).options(load_only(
+        samples = trudvsem_samples(db, profession_id, include_cards=False)
+        query = select(VacancyCollection).options(load_only(
             VacancyCollection.profession_id, VacancyCollection.updated_at, VacancyCollection.started_at,
             VacancyCollection.run_id, VacancyCollection.lease_until, VacancyCollection.error,
             VacancyCollection.progress, VacancyCollection.stats,
             VacancyCollection.title, VacancyCollection.search_query, VacancyCollection.aliases,
             VacancyCollection.approved, VacancyCollection.config_version,
-        )).order_by(VacancyCollection.profession_id))
+        )).order_by(VacancyCollection.profession_id)
+        if profession_id is not None:
+            query = query.where(VacancyCollection.profession_id == profession_id)
+        rows = db.scalars(query)
         current = now()
         return {
             "configured": configured(request.app.state.settings),
             "profiles": [{"id": row.profession_id, "title": row.title, "search_query": row.search_query,
                           "aliases": row.aliases, "approved": row.approved,
+                          "current_config": current_sample(row.stats, row),
                           "review_ready": review_ready(row, current, samples.get(row.profession_id)),
                           **collection_status(row, current),
                           "trudvsem": trudvsem_status(samples.get(row.profession_id), row, current),
                           "stats": {field: value for field, value in row.stats.items()
-                                    if field in {"vacancies", "employers", "source", "details_fetched", "details_reused"}}}
+                                    if field in {"vacancies", "employers", "source", "details_fetched", "details_reused", "review"}}}
                          for row in rows],
         }
 
@@ -100,7 +104,7 @@ def trudvsem_status(sample, profile, current):
         return None
     return {"updated_at": utc(sample.collected_at), "vacancies": sample.stats["vacancies"],
             "employers": sample.stats["employers"], "stale": not sample_is_fresh(sample.collected_at, current),
-            "current_config": current_sample(sample.stats, profile)}
+            "current_config": current_sample(sample.stats, profile), "review": sample.stats.get("review")}
 
 
 def review_ready(row, current, trudvsem=None):
@@ -177,24 +181,23 @@ def edit_profile(profession_id: str, body: ProfileInput, request: Request, actor
 def review_profile(profession_id: str, body: ProfileReview, request: Request, actor: Actor):
     require_editor_write(request, actor)
     with request.app.state.sessions.begin() as db:
-        row = db.get(VacancyCollection, profession_id, options=[load_only(
-            VacancyCollection.stats, VacancyCollection.config_version, VacancyCollection.updated_at,
-            VacancyCollection.started_at, VacancyCollection.run_id, VacancyCollection.lease_until,
-            VacancyCollection.error, VacancyCollection.progress,
-        )])
-        if row is None:
+        statement = update(VacancyCollection).where(VacancyCollection.profession_id == profession_id)
+        # Use the same profile lock as sample publication and profile edits.
+        if not db.execute(statement.values(approved=body.approved)).rowcount:
             raise HTTPException(404, "PROFILE_NOT_FOUND")
         if body.approved:
+            row = db.get(VacancyCollection, profession_id, options=[load_only(
+                VacancyCollection.stats, VacancyCollection.config_version, VacancyCollection.updated_at,
+                VacancyCollection.started_at, VacancyCollection.run_id, VacancyCollection.lease_until,
+                VacancyCollection.error, VacancyCollection.progress,
+            )])
             trudvsem = trudvsem_samples(db, profession_id, include_cards=False).get(profession_id)
             if not review_ready(row, now(), trudvsem):
                 raise HTTPException(409, "PROFILE_REVIEW_NOT_READY")
-        statement = update(VacancyCollection).where(VacancyCollection.profession_id == profession_id)
-        if body.approved:
-            statement = statement.where(VacancyCollection.config_version == row.config_version,
-                                        VacancyCollection.updated_at == row.updated_at,
-                                        VacancyCollection.run_id == row.run_id)
-        if not db.execute(statement.values(approved=body.approved)).rowcount:
-            raise HTTPException(409, "PROFILE_REVIEW_NOT_READY")
+            for sample, stamp in ((row, row.updated_at), (trudvsem, trudvsem.collected_at if trudvsem else None)):
+                if (sample and sample_is_fresh(stamp, now()) and current_sample(sample.stats, row)
+                        and pending_review(sample.stats)):
+                    sample.stats = {**sample.stats, "review": {**sample.stats["review"], "status": "manual"}}
     return {"approved": body.approved}
 
 

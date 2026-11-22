@@ -241,8 +241,7 @@ def test_profession_kind_weights_break_relevance_ties(database_url, monkeypatch)
         # Equal relevance: the profession weight (documentation 1.0 > research 0.2) outranks the version bonus.
         assert [x["excerpt_id"] for x in sources_for_followup(db, intake, state, "action")] == ["docs", "research"]
 
-        db.add(VacancyCollection(profession_id="ml_engineer", title="ML engineer", title_key="ml engineer",
-                                 aliases=["ML инженер"], approved=True, stats={}, config_version=1))
+        db.get(VacancyCollection, "ml_engineer").approved = True
         ml = {"profession_id": "ml_engineer"}
         assert import_excerpts(db, [{**research, **ml, "id": "ml-research"}, {**docs, **ml, "id": "ml-docs"}]) == 2
         # For ML the weight order is reversed: research 1.0 > documentation 0.8.
@@ -257,7 +256,7 @@ def test_profession_kind_weights_break_relevance_ties(database_url, monkeypatch)
     ("Как изменили план? Что проверили?", 1, None),
 ])
 def test_question_trace_requires_a_valid_model_reference(monkeypatch, text, number, expected):
-    async def model(settings, schema, instructions, payload, check=None):
+    async def model(settings, schema, instructions, payload, check=None, *, cache_scope=None):
         assert schema is interview_engine.SourcedQuestion
         assert payload["market_context"][0]["number"] == 1
         return schema(text=text, source_number=number)
@@ -274,7 +273,7 @@ def test_paired_question_evaluation_changes_only_the_quote(monkeypatch):
 
     requests = []
 
-    async def model(settings, schema, instructions, payload, check=None):
+    async def model(settings, schema, instructions, payload, check=None, *, cache_scope=None):
         requests.append((schema, instructions, payload))
         return schema(text="Как проверили результат?", source_number=1 if payload["market_context"] else None)
 
@@ -387,7 +386,7 @@ def test_latest_vacancy_sample_reaches_question_but_not_card(database_url, tmp_p
     action = "Я переписал SQL-запрос."
     observed = []
 
-    async def model(settings, schema, instructions, payload, check=None):
+    async def model(settings, schema, instructions, payload, check=None, *, cache_scope=None):
         if schema is interview_engine.DiscoverySelection:
             assert "market_context" not in payload
             return schema(facts=[{"field": "task", "sentence": 1}, {"field": "action", "sentence": 2}],
@@ -412,7 +411,7 @@ def test_latest_vacancy_sample_reaches_question_but_not_card(database_url, tmp_p
 
         login("editor")
         overview = client.get("/api/v1/vacancies/overview").json()["profiles"]
-        assert {item["id"] for item in overview} == {"python_backend", "frontend", "qa", "devops"}
+        assert {item["id"] for item in overview} == {"python_backend", "frontend", "qa", "devops", "ml_engineer"}
         python_profile = next(item for item in overview if item["id"] == "python_backend")
         assert python_profile["error"] == "HH_EMPTY_SAMPLE" and python_profile["stats"]["vacancies"] == 1
         token = claim_collection(sessions, "python_backend")

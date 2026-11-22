@@ -10,21 +10,27 @@ from sqlalchemy import update
 from sqlalchemy.orm import load_only
 
 from backend.db import VacancyCollection, VacancySnapshot, VacancySourceSample
-from backend.vacancy_import import SAMPLE_SIZE, sample_stats
-from backend.vacancy_parser import build_vacancy, clean_html, role_key, with_sections
+from backend.discovery_fetch import DNS_ERROR, is_dns_failure
+from backend.settings import MAX_VACANCY_SAMPLE_LIMIT
+from backend.vacancy_import import sample_stats
+from backend.vacancy_parser import build_vacancy, clean_html, role_key, vacancy_preset, with_sections
+from backend.vacancy_samples import vacancy_review
 
 
 logger = logging.getLogger(__name__)
 API = "https://opendata.trudvsem.ru/api/v1/vacancies"
-PAGE_SIZE = 50
+PAGE_SIZE = 100
 MAX_PAGES = 3
 MAX_TERMS = 4
+REQUEST_TIMEOUT = 8
+COLLECTION_BUDGET = 45
 EXTERNAL_ID = re.compile(r"[a-zA-Z0-9_-]{1,80}")
 DEFAULT_TERMS = {
     "python_backend": ("Python", "Python backend", "Django", "FastAPI"),
     "frontend": ("Фронтенд", "Frontend", "React"),
     "qa": ("Тестировщик", "Инженер по тестированию", "QA", "SDET"),
     "devops": ("DevOps", "SRE", "DevSecOps", "Инженер платформы"),
+    "ml_engineer": ("ML инженер", "ML engineer", "машинного обучения", "machine learning"),
 }
 
 
@@ -33,8 +39,9 @@ class TrudvsemError(RuntimeError):
 
 
 def search_terms(profile):
-    if profile.aliases is None and profile.profession_id in DEFAULT_TERMS:
-        return DEFAULT_TERMS[profile.profession_id]
+    preset = vacancy_preset(profile.profession_id, profile)
+    if preset in DEFAULT_TERMS:
+        return DEFAULT_TERMS[preset]
     terms = {}
     for term in (profile.title, *(profile.aliases or [])):
         if key := role_key(term):
@@ -51,7 +58,7 @@ def vacancy_url(value, external_id, company_code):
     except ValueError:
         pass
     if company_code:
-        return f"{API}/vacancy/{company_code}/{external_id}"
+        return f"https://trudvsem.ru/vacancy/card/{company_code}/{external_id}"
     return None
 
 
@@ -104,13 +111,24 @@ def parse_vacancy(item, profile):
     return {**card, "source": "trudvsem"}
 
 
-def fetch_page(client, term, page):
-    try:
-        response = client.get(API, params={"text": term, "offset": page, "limit": PAGE_SIZE})
-    except httpx.TimeoutException:
-        raise TrudvsemError("TRUDVSEM_TIMEOUT") from None
-    except httpx.RequestError:
-        raise TrudvsemError("TRUDVSEM_UNAVAILABLE") from None
+def fetch_page(client, term, page, *, deadline):
+    params = {"text": term, "offset": page, "limit": PAGE_SIZE}
+    for attempt in range(2):
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            raise TrudvsemError("TRUDVSEM_COLLECTION_TIMEOUT")
+        try:
+            response = client.get(API, params=params, timeout=min(REQUEST_TIMEOUT, remaining))
+            break
+        except httpx.TimeoutException:
+            if monotonic() >= deadline:
+                raise TrudvsemError("TRUDVSEM_COLLECTION_TIMEOUT") from None
+            if attempt == 1:
+                raise TrudvsemError("TRUDVSEM_REQUEST_TIMEOUT") from None
+        except httpx.RequestError as exc:
+            raise TrudvsemError(DNS_ERROR if is_dns_failure(exc) else "TRUDVSEM_UNAVAILABLE") from None
+    if monotonic() >= deadline:
+        raise TrudvsemError("TRUDVSEM_COLLECTION_TIMEOUT")
     if response.status_code == 429:
         raise TrudvsemError("TRUDVSEM_RATE_LIMITED")
     if not response.is_success:
@@ -133,21 +151,22 @@ def fetch_page(client, term, page):
     return records
 
 
-def gather_cards(client, profile):
-    deadline = monotonic() + 45
+def gather_cards(client, profile, *, limit=MAX_VACANCY_SAMPLE_LIMIT):
+    deadline = monotonic() + COLLECTION_BUDGET
     terms = list(search_terms(profile))
     cards = {}
     for page in range(MAX_PAGES):
         next_terms = []
         for term in terms:
-            if monotonic() >= deadline:
-                raise TrudvsemError("TRUDVSEM_TIMEOUT")
-            records = fetch_page(client, term, page)
+            records = fetch_page(client, term, page, deadline=deadline)
             for record in records:
-                card = parse_vacancy(record["vacancy"], profile)
+                item = record["vacancy"]
+                if f"trudvsem:{item.get('id')}" in cards:
+                    continue
+                card = parse_vacancy(item, profile)
                 if card:
                     cards.setdefault(card["id"], card)
-                    if len(cards) == SAMPLE_SIZE:
+                    if len(cards) == limit:
                         return list(cards.values())
             if len(records) >= PAGE_SIZE:
                 next_terms.append(term)
@@ -165,8 +184,8 @@ def collect_trudvsem(sessions, settings, profession):
             VacancyCollection.title, VacancyCollection.aliases, VacancyCollection.config_version,
         )])
     try:
-        with httpx.Client(timeout=8, follow_redirects=False) as client:
-            cards = gather_cards(client, profile)
+        with httpx.Client(follow_redirects=False) as client:
+            cards = gather_cards(client, profile, limit=settings.vacancy_sample_limit)
     except TrudvsemError as exc:
         logger.warning("Work in Russia collection failed for %s: %s", profession, exc)
         return {"status": "failed", "code": str(exc)}
@@ -186,6 +205,8 @@ def lock_current_profile(db, profession, version):
 
 
 def save_sample(db, profession, run_id, collected, cards, stats):
+    profile = db.get(VacancyCollection, profession)
+    stats = {**stats, "review": vacancy_review(cards, profile.approved)}
     db.add(VacancySnapshot(id=run_id, profession_id=profession, collected_at=collected, stats=stats, cards=cards))
     db.flush()
     pointer = db.get(VacancySourceSample, (profession, "trudvsem"))

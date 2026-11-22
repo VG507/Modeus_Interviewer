@@ -7,7 +7,7 @@ from backend.interview_schemas import CaseState
 
 
 def test_evidence_uses_original_sentences_and_preserves_uncertainty(monkeypatch):
-    async def classify(*args, check=None):
+    async def classify(*args, check=None, cache_scope=None):
         return interview_engine.EvidenceSelection(
             facts=[
                 {"field": "task", "sentence": 1},
@@ -34,7 +34,7 @@ def test_evidence_uses_original_sentences_and_preserves_uncertainty(monkeypatch)
 
 
 def test_unknown_sentence_is_rejected(monkeypatch):
-    async def classify(*args, check):
+    async def classify(*args, check, cache_scope=None):
         result = interview_engine.EvidenceSelection(
             facts=[{"field": "action", "sentence": 2}],
             ambiguous=[], not_applicable=[], refused=False,
@@ -52,7 +52,7 @@ def test_unknown_sentence_is_rejected(monkeypatch):
     ("unrelated", "Мы долго обсуждали погоду в выходные."),
 ])
 def test_unanchored_or_unrelated_reply_does_not_create_a_topic(monkeypatch, fit, reply):
-    async def classify(*args, check=None):
+    async def classify(*args, check=None, cache_scope=None):
         return interview_engine.DiscoverySelection(
             facts=[{"field": "task", "sentence": 1}],
             ambiguous=[], not_applicable=[], refused=False, answer_fit=fit, topic_title=reply,
@@ -69,7 +69,7 @@ def test_unanchored_or_unrelated_reply_does_not_create_a_topic(monkeypatch, fit,
 
 
 def test_pilot_reason_and_team_action_survive_wrong_model_labels(monkeypatch):
-    async def classify(*args, check=None):
+    async def classify(*args, check=None, cache_scope=None):
         return interview_engine.EvidenceSelection(
             facts=[{"field": "task", "sentence": 1}, {"field": "verification", "sentence": 1}],
             ambiguous=["task"], not_applicable=[], refused=False,
@@ -95,7 +95,7 @@ def test_pilot_reason_and_team_action_survive_wrong_model_labels(monkeypatch):
 
 
 def test_diagnostic_finding_and_measured_effect_keep_their_card_sections(monkeypatch):
-    async def classify(*args, check=None):
+    async def classify(*args, check=None, cache_scope=None):
         return interview_engine.EvidenceSelection(
             facts=[{"field": "task", "sentence": 1}, {"field": "task", "sentence": 3}],
             ambiguous=[], not_applicable=[], refused=False,
@@ -114,7 +114,7 @@ def test_diagnostic_finding_and_measured_effect_keep_their_card_sections(monkeyp
 
 
 def test_explanation_of_design_fit_is_a_reason_and_explicit_action_stays_separate(monkeypatch):
-    async def classify(*args, check=None):
+    async def classify(*args, check=None, cache_scope=None):
         return interview_engine.EvidenceSelection(
             facts=[{"field": "action", "sentence": 2}, {"field": "action", "sentence": 3}],
             ambiguous=[], not_applicable=[], refused=False,
@@ -133,7 +133,7 @@ def test_explanation_of_design_fit_is_a_reason_and_explicit_action_stays_separat
 
 
 def test_reported_reason_and_before_after_measurement_survive_model_omissions(monkeypatch):
-    async def classify(settings, schema, instructions, payload, check=None):
+    async def classify(settings, schema, instructions, payload, check=None, *, cache_scope=None):
         facts = [{"field": "action", "sentence": 1}] if payload["intent"] == "get_case" else []
         return schema(facts=facts, ambiguous=[], not_applicable=[], refused=False, answer_fit="work_case")
 
@@ -152,7 +152,7 @@ def test_reported_reason_and_before_after_measurement_survive_model_omissions(mo
 
 @pytest.mark.parametrize("fit", ["work_case", "unclear"])
 def test_frontend_episode_survives_empty_extraction_and_keeps_only_evidence(monkeypatch, fit):
-    async def classify(settings, schema, instructions, payload, check=None):
+    async def classify(settings, schema, instructions, payload, check=None, *, cache_scope=None):
         opening = payload["intent"] == "get_case"
         result = dict(facts=[] if opening else [{"field": "task", "sentence": 1}, {"field": "action", "sentence": 2}],
                       ambiguous=[], not_applicable=[], refused=False, answer_fit=fit if opening else "work_case")
@@ -194,7 +194,7 @@ def test_long_open_reply_keeps_evidence_from_its_last_batch(monkeypatch):
     assert 2 * interview_engine.ANSWER_BATCH_SIZE < len(reply) <= 8000
     calls = []
 
-    async def classify(settings, schema, instructions, payload, check=None):
+    async def classify(settings, schema, instructions, payload, check=None, *, cache_scope=None):
         sentences = {item["text"]: item["number"] for item in payload["sentences"]}
         calls.append(payload)
         common = dict(ambiguous=[], not_applicable=[], refused=False, answer_fit="work_case")
@@ -219,7 +219,7 @@ def test_long_open_reply_keeps_evidence_from_its_last_batch(monkeypatch):
 
 @pytest.mark.parametrize("reply", ["Не знаю.", "не помню", "Честно, не могу вспомнить…", "Без понятия"])
 def test_no_recall_skips_the_question_instead_of_asking_to_rephrase(monkeypatch, reply):
-    async def classify(*args, check=None):
+    async def classify(*args, check=None, cache_scope=None):
         raise AssertionError("A no-recall reply does not need the model")
 
     monkeypatch.setattr(interview_engine, "ask_model", classify)
@@ -244,7 +244,7 @@ def test_no_recall_skips_the_question_instead_of_asking_to_rephrase(monkeypatch,
     ("Понял, что ты добавил индекс. Почему именно его?", interview_engine.FALLBACK_QUESTIONS["decision"]),
 ])
 def test_followup_keeps_a_polite_two_part_question(monkeypatch, text, expected):
-    async def model(settings, schema, instructions, payload, check=None):
+    async def model(settings, schema, instructions, payload, check=None, *, cache_scope=None):
         return schema(text=text)
 
     monkeypatch.setattr(interview_engine, "ask_model", model)
@@ -261,7 +261,7 @@ def test_broad_reply_gets_a_short_question_without_examples():
 
 
 def test_second_broad_reply_shows_a_sample_answer(monkeypatch):
-    async def model(settings, schema, instructions, payload, check=None):
+    async def model(settings, schema, instructions, payload, check=None, *, cache_scope=None):
         return schema(text="Как вы поняли, что отчёт стал строиться быстрее?")
 
     monkeypatch.setattr(interview_engine, "ask_model", model)
@@ -293,7 +293,7 @@ def test_case_with_facts_asks_once_more_after_two_broad_replies():
 def test_question_does_not_assume_a_method_or_success(monkeypatch, intent):
     sent = {}
 
-    async def model(settings, schema, instructions, payload, check=None):
+    async def model(settings, schema, instructions, payload, check=None, *, cache_scope=None):
         sent.update(instructions=instructions, goal=payload["goal"])
         return schema(text="Без вопроса.")
 
@@ -308,7 +308,7 @@ def test_question_does_not_assume_a_method_or_success(monkeypatch, intent):
 
 
 def test_long_followup_is_replaced_with_a_clear_question(monkeypatch):
-    async def model(settings, schema, instructions, payload, check=None):
+    async def model(settings, schema, instructions, payload, check=None, *, cache_scope=None):
         return schema(text="Слушаю, вы говорили, что отчёт грузился минуту — " + "это значит, что процесс шёл, " * 8
                            + "что вы сделали?")
 
@@ -323,7 +323,7 @@ def test_long_followup_is_replaced_with_a_clear_question(monkeypatch):
     ("Да разные баги находил", None),
 ])
 def test_brief_episode_starts_a_case(monkeypatch, reply, topic):
-    async def classify(*args, check=None):
+    async def classify(*args, check=None, cache_scope=None):
         return interview_engine.DiscoverySelection(facts=[], ambiguous=[], not_applicable=[], refused=False,
                                                    answer_fit="unclear", topic_title=None)
 
@@ -341,7 +341,7 @@ def test_brief_episode_starts_a_case(monkeypatch, reply, topic):
     "Хорошо, я получил ответ: «Отчёт грузился минуту». Суть — отчёт грузился. Вопрос: С чего вы начали?",
 ])
 def test_malformed_followup_falls_back_to_a_fixed_question(monkeypatch, reply):
-    async def model(settings, schema, instructions, payload, check=None):
+    async def model(settings, schema, instructions, payload, check=None, *, cache_scope=None):
         if isinstance(reply, Exception):
             raise reply
         return schema(text=reply)
@@ -353,7 +353,7 @@ def test_malformed_followup_falls_back_to_a_fixed_question(monkeypatch, reply):
 
 
 def test_unavailable_model_still_fails_the_followup(monkeypatch):
-    async def model(settings, schema, instructions, payload, check=None):
+    async def model(settings, schema, instructions, payload, check=None, *, cache_scope=None):
         raise RuntimeError("LLM_HTTP_ERROR: 503")
 
     monkeypatch.setattr(interview_engine, "ask_model", model)
@@ -367,7 +367,7 @@ def test_unavailable_model_still_fails_the_followup(monkeypatch):
     ("Был медленный отчёт, я добавил индекс. Замеров не было, это был срочный хотфикс.", ["verification"]),
 ])
 def test_not_applicable_needs_the_speakers_words(monkeypatch, reply, kept):
-    async def classify(*args, check=None):
+    async def classify(*args, check=None, cache_scope=None):
         return interview_engine.TurnSelection(
             facts=[{"field": "task", "sentence": 1}], ambiguous=[], refused=False, answer_fit="work_case",
             not_applicable=["task", "context", "action", "decision", "verification"] if not kept else kept,
@@ -382,7 +382,7 @@ def test_not_applicable_needs_the_speakers_words(monkeypatch, reply, kept):
 
 
 def test_actions_without_the_problem_ask_about_the_problem(monkeypatch):
-    async def classify(*args, check=None):
+    async def classify(*args, check=None, cache_scope=None):
         return interview_engine.DiscoverySelection(
             facts=[{"field": "action", "sentence": 1}, {"field": "verification", "sentence": 1}],
             ambiguous=[], not_applicable=[], refused=False, answer_fit="work_case", topic_title=None,
@@ -397,7 +397,7 @@ def test_actions_without_the_problem_ask_about_the_problem(monkeypatch):
     asked = {**state, "asked_intents": [*state["asked_intents"], "clarify_task"]}
     assert interview_engine.choose_intent(asked) == "get_case"
 
-    async def malformed(*args):
+    async def malformed(*args, cache_scope=None):
         return None
 
     monkeypatch.setattr(interview_engine, "ask_question", malformed)

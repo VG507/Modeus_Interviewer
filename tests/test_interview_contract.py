@@ -117,7 +117,7 @@ def test_tone_is_kept_in_the_profile_and_steers_only_the_instructions(database_u
 
     captured = []
 
-    async def model(settings, schema, instructions, payload, check=None):
+    async def model(settings, schema, instructions, payload, check=None, *, cache_scope=None):
         captured.append((instructions, payload))
         return schema(text="Что вы тогда сделали?")
 

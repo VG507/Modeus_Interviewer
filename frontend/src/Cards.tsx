@@ -4,7 +4,7 @@ import type {
   Card, CardContent, CardDetail, CardEvidence, CardFact, CardGap, Page, PublicCard, PublicSummary, SearchPage,
 } from './api';
 
-type User = { id: string; is_editor: boolean };
+type User = { id: string; is_editor: boolean; is_demo?: boolean };
 type SessionProps = { onSessionExpired: () => void };
 
 function status(card: Card) {
@@ -86,7 +86,7 @@ export function CardsList({ scope, onSessionExpired }: SessionProps & {
     review: 'Карточек на проверке пока нет.', published: 'Опубликованных карточек пока нет.' };
 
   return <>
-    {scope === 'review' || scope === 'published' ? <nav className="actions cards-nav" aria-label="Редактура">
+    {scope === 'review' || scope === 'published' ? <nav className="actions cards-nav" aria-label="Модерация">
       <a href="#/review" aria-current={scope === 'review' ? 'page' : undefined}>На проверке</a>
       <a href="#/review/published" aria-current={scope === 'published' ? 'page' : undefined}>Опубликованные</a>
     </nav> : null}
@@ -396,7 +396,7 @@ export function CardScreen({ id, user, onSessionExpired }: SessionProps & { id: 
     event.preventDefault();
     if (card?.review_blocker || dirty) return;
     void action('/submit-review', { consent, show_author: showAuthor, author_name: showAuthor ? author : null },
-      'Карточка отправлена редактору.');
+      'Карточка отправлена модератору.');
   }
 
   function saveFact(event: FormEvent) {
@@ -413,14 +413,14 @@ export function CardScreen({ id, user, onSessionExpired }: SessionProps & { id: 
   return <>
     <nav className="actions cards-nav" aria-label="Карточка">
       {owner && <><a href="#/cards">← Мои карточки</a><a href={`#/interviews/${card.session_id}`}>Открыть интервью</a></>}
-      {user.is_editor && <a href={published ? '#/review/published' : '#/review'}>К редактуре</a>}
-      {published && <a href={`#/catalog/${card.id}`}>Открыть в каталоге</a>}
+      {user.is_editor && <a href={published ? '#/review/published' : '#/review'}>К модерации</a>}
+      {published && !user.is_demo && <a href={`#/catalog/${card.id}`}>Открыть в каталоге</a>}
     </nav>
     <h1>{card.content.title}</h1>
     <div className="stack">
       <section className="panel">
         <p className="status">{status(card)}</p>
-        {card.review?.comment && <p className="card-text">Комментарий редактора: {card.review.comment}</p>}
+        {card.review?.comment && <p className="card-text">Комментарий модератора: {card.review.comment}</p>}
         {owner && !published ? <form className="composer" onSubmit={save}>
           <fieldset disabled={disabled}>
             <label htmlFor="card-title-edit">Название</label>
@@ -448,7 +448,7 @@ export function CardScreen({ id, user, onSessionExpired }: SessionProps & { id: 
           </form>}
           {!hasFacts && reference && hasStructuredContent(reference) && <details>
             <summary>Факты из предыдущей версии</summary>
-            <p>Видны только в редактуре. В каталоге публикуется согласованная версия карточки.</p>
+            <p>Видны только при модерации.</p>
             <Facts content={reference} evidence={owner ? evidence : undefined}/>
           </details>}
         </div>}
@@ -458,21 +458,21 @@ export function CardScreen({ id, user, onSessionExpired }: SessionProps & { id: 
         <h2>Отправить на проверку</h2>
         <fieldset disabled={disabled || dirty}>
           <label className="check"><input type="checkbox" checked={consent}
-            onChange={event => setConsent(event.target.checked)} required/> Согласен на публикацию этой версии после проверки редактором</label>
+            onChange={event => setConsent(event.target.checked)} required/> Согласен на публикацию этой версии после проверки модератором</label>
           <label className="check"><input type="checkbox" checked={showAuthor}
             onChange={event => setShowAuthor(event.target.checked)}/> Указать имя автора в каталоге</label>
           {showAuthor && <>
             <label htmlFor="card-author">Отображаемое имя или псевдоним</label>
             <input id="card-author" value={author} onChange={event => setAuthor(event.target.value)} required maxLength={120}/>
           </>}
-          <button disabled={!!card.review_blocker || !consent || (showAuthor && !author.trim())}>Отправить редактору</button>
+          <button disabled={!!card.review_blocker || !consent || (showAuthor && !author.trim())}>Отправить модератору</button>
         </fieldset>
         {dirty && <p className="feedback">Сначала сохраните правки.</p>}
         {!dirty && card.review_blocker && <p className="feedback">{card.review_blocker}</p>}
       </form>}
 
       {user.is_editor && (inReview || published) && <section className="panel">
-        <h2>{published ? 'Управление публикацией' : 'Решение редактора'}</h2>
+        <h2>{published ? 'Управление публикацией' : 'Решение модератора'}</h2>
         {inReview && <p>Проверьте текст, структурированные факты и отображаемое имя на персональные и закрытые сведения.</p>}
         <fieldset disabled={disabled || dirty}>
           <label htmlFor="card-comment">Комментарий <span>{published ? 'обязателен' : 'обязателен при возврате'}</span></label>
@@ -481,7 +481,8 @@ export function CardScreen({ id, user, onSessionExpired }: SessionProps & { id: 
           <div className="actions">
             {published ? <button className="secondary" disabled={!comment.trim()} onClick={() =>
               void action('/unpublish', { comment }, 'Карточка снята с публикации.')}>Снять с публикации</button> : <>
-              <button onClick={() => review('accept', 'Карточка опубликована.')}>Опубликовать</button>
+              <button onClick={() => review('accept', user.is_demo ? 'Карточка одобрена.' : 'Карточка опубликована.')}>
+                {user.is_demo ? 'Одобрить карточку' : 'Опубликовать'}</button>
               <button className="secondary" disabled={!comment.trim()} onClick={() =>
                 review('return', 'Карточка возвращена автору.')}>Вернуть на доработку</button>
               <button className="quiet" onClick={() => review('keep_private', 'Карточка оставлена приватной.')}>Оставить приватной</button>

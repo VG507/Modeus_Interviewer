@@ -17,7 +17,9 @@ from sqlalchemy import select
 
 from backend.db import DiscoveryCandidate, DiscoveryRevision, Source, SourceExcerpt, VacancyCollection, now
 from backend.discovery import collect_records, collection_lease, item_digest
-from backend.discovery_fetch import Collected, CollectionError, GITHUB, ProviderRateLimit, SENSITIVE, fetch, public_repository
+from backend.discovery_fetch import (
+    DNS_ERROR, GITHUB, SENSITIVE, Collected, CollectionError, ProviderRateLimit, fetch, is_dns_failure, public_repository,
+)
 from backend.interview_schemas import Schema
 from backend.llm import structured_completion
 from backend.source_context import ReviewedExcerpt, import_excerpts
@@ -240,8 +242,8 @@ def refresh_skills(sessions, settings, profession, targets, transport):
             except ProviderRateLimit:
                 errors[target.repo] = "DISCOVERY_RATE_LIMIT"
                 break
-            except (httpx.HTTPError, CollectionError, KeyError, TypeError, ValueError):
-                errors[target.path] = "DISCOVERY_UNAVAILABLE"
+            except (httpx.HTTPError, CollectionError, KeyError, TypeError, ValueError) as exc:
+                errors[target.path] = DNS_ERROR if is_dns_failure(exc) else "DISCOVERY_UNAVAILABLE"
                 continue
 
             digest = item_digest(item)

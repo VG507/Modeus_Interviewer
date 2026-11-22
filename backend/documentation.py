@@ -15,7 +15,7 @@ from backend.db import (
     VacancyCollection, now,
 )
 from backend.discovery import collect_records, insert_row, item_digest
-from backend.discovery_fetch import Collected, CollectionError
+from backend.discovery_fetch import Collected, CollectionError, is_dns_failure
 from backend.documentation_fetch import TARGETS, document_sections, release_notes
 
 
@@ -106,8 +106,9 @@ def collect_documentation(sessions, profession=None, *, due=None):
                 error = str(exc)
             except httpx.HTTPStatusError as exc:
                 error = f"Официальный сайт вернул HTTP {exc.response.status_code}."
-            except httpx.HTTPError:
-                error = "Сетевая ошибка при загрузке официальной документации."
+            except httpx.HTTPError as exc:
+                error = ("Сервер не смог разрешить имя сайта документации (DNS)." if is_dns_failure(exc)
+                         else "Сетевая ошибка при загрузке официальной документации.")
             except (UnicodeError, ValueError):
                 error = "Не удалось разобрать ответ официального сайта."
             if error:

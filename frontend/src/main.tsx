@@ -23,6 +23,8 @@ function App() {
   const interviewId = route.match(/^#\/interviews\/([a-zA-Z0-9_-]+)$/)?.[1];
   const cardId = route.match(/^#\/cards\/([a-zA-Z0-9_-]+)$/)?.[1];
   const themesView = route === '#/catalog/themes';
+  const accountLogin = route === '#/account/login';
+  const showAccountLogin = accountLogin && (!user || user.is_demo);
   const demoModerator = user?.is_demo && user.is_editor;
   const canManageData = user?.is_editor && !user.is_demo;
   const reviewView = route === '#/review' || route === '#/review/published' ||
@@ -73,7 +75,7 @@ function App() {
     const data = new FormData(event.currentTarget);
     void auth(async () => {
       setUser(await command<User>('/auth/login', { email: data.get('email'), password: data.get('password') }));
-      if (route === '#/account/login') {
+      if (accountLogin) {
         window.location.hash = '';
         setRoute('');
       }
@@ -117,6 +119,7 @@ function App() {
       <div className="masthead-side">
         {user && <div className="account">{!user.is_demo &&
           <span>{user.is_editor ? 'Модератор' : 'Участник'}</span>}
+          {user.is_demo && !accountLogin && <a href="#/account/login">Рабочий аккаунт</a>}
           <button className="quiet" disabled={busy} onClick={logout}>Выйти</button></div>}
         <ThemeToggle/>
         {user?.is_demo && <select className="role-switch" aria-label="Роль в демо" disabled={busy}
@@ -130,8 +133,8 @@ function App() {
     <Fragment key={user?.id ?? 'guest'}>
     {themesView ? <Themes/> : catalogId ? <CatalogCard key={catalogId} id={catalogId}/> : route === '#/catalog' ?
       <CardsList key="catalog" scope="catalog" onSessionExpired={expireSession}/> :
-      loading ? <p role="status">Проверяем вход…</p> : !user ?
-      demoEnabled && route !== '#/account/login' ?
+      loading ? <p role="status">Проверяем вход…</p> : !user || showAccountLogin ?
+      demoEnabled && !showAccountLogin ?
       <section className="panel login demo-login" aria-labelledby="demo-heading">
         <h1 id="demo-heading">Демо Modeus</h1>
         <fieldset disabled={busy} aria-busy={busy}>
@@ -144,6 +147,7 @@ function App() {
             <p>Проверьте готовую карточку по вопросам, ответам и источникам.</p>
           </div>
         </fieldset>
+        <p><a href="#/account/login">Войти в рабочий аккаунт</a></p>
       </section> :
       <form className="panel login" onSubmit={login}>
         <h1>Вход в Modeus</h1>
@@ -154,6 +158,7 @@ function App() {
           <input id="password" type="password" name="password" autoComplete="current-password" required maxLength={256}/>
           <button>{busy ? 'Входим…' : 'Войти'}</button>
         </fieldset>
+        {demoEnabled && showAccountLogin && <p><a href="#">Вернуться в демо</a></p>}
       </form> : cardId ? <CardScreen key={cardId} id={cardId} user={user} onSessionExpired={expireSession}/> :
       route === '#/cards' ? <CardsList key="own" scope="own" onSessionExpired={expireSession}/> :
       dataView ?

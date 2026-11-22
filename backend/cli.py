@@ -3,6 +3,7 @@ import asyncio
 import getpass
 import json
 import ssl
+from datetime import date
 from pathlib import Path
 from urllib.parse import quote
 
@@ -21,6 +22,7 @@ from backend.hn import HackerNewsUnavailable, collect_hn
 from backend.llm import check_llm
 from backend.onet import VERSION as ONET_VERSION, OnetError, import_tasks as import_onet_tasks
 from backend.openalex import collect_research
+from backend.profession_summary import export_profession
 from backend.security import hash_password
 from backend.settings import Settings
 from backend.source_context import import_excerpts
@@ -96,6 +98,13 @@ def main():
     forget = sub.add_parser("clear-llm-cache", help="Forget stored model answers so the model is asked again")
     forget.add_argument("--model", help="Only answers of this model")
     sub.add_parser("embed-cards", help="Embed published cards whose text or embedding model changed")
+    summary = sub.add_parser("export-profession",
+                             help="Summarize skills, competencies and knowledge of a profession into an Excel file")
+    summary.add_argument("profession")
+    summary.add_argument("--materials", type=Path, help="Read collected data from this JSON file instead of the database")
+    summary.add_argument("--output", type=Path, help="Excel file to write, by default in .work")
+    summary.add_argument("--from", dest="since", type=date.fromisoformat, help="First day of the period, YYYY-MM-DD")
+    summary.add_argument("--to", dest="until", type=date.fromisoformat, help="Last day of the period, YYYY-MM-DD")
     copy = sub.add_parser("copy-database", help="Copy all rows from another database into the empty DATABASE_URL")
     copy.add_argument("source", help="Source database URL, e.g. sqlite:///./.work/modeus.db")
     collect = sub.add_parser("import-vacancies", help="Refresh HH vacancies for one profile")
@@ -167,6 +176,20 @@ def main():
             # No exception body from HTTP clients: URLs may include credentials.
             print(str(exc) if type(exc) is RuntimeError else type(exc).__name__)
             raise SystemExit(1) from None
+        return
+    if args.command == "export-profession":
+        engine, sessions = database(settings.database_url)
+        try:
+            result = asyncio.run(export_profession(sessions, settings, args.profession, args.materials, args.output,
+                                                   args.since, args.until))
+        except (LookupError, ValueError, OSError) as exc:
+            parser.exit(1, f"export-profession: {exc}\n")
+        except (RuntimeError, httpx.HTTPError) as exc:
+            # No exception body from HTTP clients: URLs may include credentials.
+            parser.exit(1, f"export-profession: {exc if type(exc) is RuntimeError else type(exc).__name__}\n")
+        finally:
+            engine.dispose()
+        print(json.dumps(result, ensure_ascii=False))
         return
     if args.command == "embed-cards":
         engine, sessions = database(settings.database_url)

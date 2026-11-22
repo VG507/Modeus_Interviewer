@@ -21,6 +21,7 @@ from backend.interview_api import router as interview_router
 from backend.interview_worker import run_worker
 from backend.maintenance import schedule_pruning
 from backend.max_bot import run_max_bot
+from backend.report_api import router as report_router
 from backend.security import check_password, hash_password, token_hash
 from backend.settings import Settings
 from backend.telegram_bot import run_bot
@@ -75,6 +76,7 @@ def create_app(settings: Settings | None = None):
     app.include_router(card_router)
     app.include_router(vacancy_router)
     app.include_router(discovery_router)
+    app.include_router(report_router)
 
     @app.exception_handler(StarletteHTTPException)
     async def error_handler(request, exc):

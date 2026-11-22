@@ -102,6 +102,9 @@ const messages: Record<string, string> = {
   DOCUMENTATION_TARGET_INVALID: 'Выберите источники из списка официальной документации.',
   DOCUMENTATION_QUOTE_INVALID: 'Цитата должна дословно встречаться в тексте раздела, а деталь — в цитате.',
   DOCUMENTATION_REVISION_CHANGED: 'Редакция источника изменилась. Откройте актуальную версию для проверки.',
+  PROFILE_NOT_FOUND: 'Профессия не найдена.',
+  REPORT_NO_DATA: 'За выбранный период по этой профессии нет вакансий, карточек и источников.',
+  REPORT_DEMO_NOT_FOUND: 'Для этой профессии нет демо-данных.',
 };
 
 export class ApiError extends Error {
@@ -120,16 +123,33 @@ export function processingError(code: string) {
   return messages[code] ?? 'Обработка остановилась.';
 }
 
+async function failure(response: Response) {
+  const data = await response.json().catch(() => null);
+  const retryAfter = response.headers.get('Retry-After');
+  const code = data?.error?.code ?? '';
+  return new ApiError(response.status, code, retryAfter && /^\d+$/.test(retryAfter) ?
+    Number(retryAfter) : undefined, code === 'DOCUMENTATION_REVIEW_INVALID' ? data.error.message : undefined);
+}
+
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch('/api/v1' + path, { ...options, credentials: 'same-origin' });
-  if (!response.ok) {
-    const data = await response.json().catch(() => null);
-    const retryAfter = response.headers.get('Retry-After');
-    const code = data?.error?.code ?? '';
-    throw new ApiError(response.status, code, retryAfter && /^\d+$/.test(retryAfter) ?
-      Number(retryAfter) : undefined, code === 'DOCUMENTATION_REVIEW_INVALID' ? data.error.message : undefined);
-  }
+  if (!response.ok) throw await failure(response);
   return (response.status === 204 ? undefined : await response.json()) as T;
+}
+
+// A file the server builds for a request, saved under the name the server gives it.
+export async function download(path: string, body: object, fallbackName: string) {
+  const response = await fetch('/api/v1' + path, {
+    method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  if (!response.ok) throw await failure(response);
+  const name = response.headers.get('Content-Disposition')?.match(/filename="([^"]+)"/)?.[1] ?? fallbackName;
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(await response.blob());
+  link.download = name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
+  return name;
 }
 
 export function command<T>(path: string, body: object, key?: string, method = 'POST') {

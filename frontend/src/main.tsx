@@ -5,6 +5,7 @@ import { InterviewHome } from './InterviewHome';
 import { InterviewScreen } from './InterviewScreen';
 import { EditorData } from './EditorData';
 import { CardsList, CardScreen, CatalogCard } from './Cards';
+import { Reports } from './Reports';
 import { Themes } from './Themes';
 import { ThemeToggle } from './ThemeToggle';
 import './style.css';
@@ -81,6 +82,7 @@ function App() {
         {user && <a href="#/cards">Мои карточки</a>}
         {user?.is_editor && <a href="#/review">Редактура</a>}
         {user?.is_editor && <a href="#/data" aria-current={dataView ? 'page' : undefined}>Данные</a>}
+        {user?.is_editor && <a href="#/report" aria-current={route === '#/report' ? 'page' : undefined}>Итоговый отчёт</a>}
         {!user && (route === '#/catalog' || catalogId || themesView) && <a href="#">Войти</a>}
       </nav>
       <div className="masthead-side">
@@ -105,6 +107,9 @@ function App() {
       route === '#/cards' ? <CardsList key="own" scope="own" onSessionExpired={expireSession}/> :
       dataView ?
         user.is_editor ? <EditorData onSessionExpired={expireSession}/> :
+          <p role="alert">Для этого раздела нужна роль редактора.</p> :
+      route === '#/report' ?
+        user.is_editor ? <Reports onSessionExpired={expireSession}/> :
           <p role="alert">Для этого раздела нужна роль редактора.</p> :
       route === '#/review' || route === '#/review/published' ?
         user.is_editor ? <CardsList key={route} scope={route === '#/review' ? 'review' : 'published'}

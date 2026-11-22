@@ -2,8 +2,13 @@ export type Topic = { id: string; profession_id: string; title: string };
 export type ProjectContext = {
   task: string; period: string; role: string; responsibility: string; stack: string; constraints: string;
 };
+export const tones = {
+  friendly: 'Дружелюбный', business: 'Деловой', playful: 'Шутливый',
+} as const;
+export type Tone = keyof typeof tones;
 export type Context = {
   role: string; experience: string; responsibilities: string; conditions: string; projects?: ProjectContext[];
+  tone?: Tone;
 };
 export type Message = {
   id: string; kind: 'question' | 'answer' | 'control'; text: string | null;

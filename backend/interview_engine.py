@@ -173,7 +173,8 @@ def answer_batches(text):
 def prompt_context(state):
     intake = state.get("intake", {})
     projects = intake.get("projects", [])
-    context = {field: value for field, value in intake.items() if field != "projects" and value}
+    # The tone is an instruction (TONES), not a fact about the expert.
+    context = {field: value for field, value in intake.items() if field not in {"projects", "tone"} and value}
     if projects:
         context["projects"] = [
             {field: value for field, value in project.items() if value}
@@ -393,6 +394,27 @@ INTENTS = {
     "clarify_task": "Участник рассказал, что сделал, но не сказал, какая была проблема или задача. "
                     "Назови его действие и спроси, что тогда случилось или что нужно было сделать.",
 }
+# How the model's questions sound, chosen in the questionnaire. The rules that follow in the prompt
+# (one question, 15 words, "вы", no hints or praise) hold in every tone. The friendly text is the
+# original prompt word for word, so default interviews keep their cached answers.
+TONES = {
+    "friendly": "Ты интервьюер: дружелюбный коллега, которому правда интересна история. Пиши по-русски просто "
+                "и вежливо, без канцелярита.",
+    "business": "Ты интервьюер на рабочей встрече: собранный и вежливый коллега. Пиши по-русски сдержанно "
+                "и по существу, без эмоций, разговорных слов и канцелярита.",
+    "playful": "Ты интервьюер: весёлый коллега, который любит хорошие истории. Пиши по-русски живо, с лёгким "
+               "добрым юмором: уместны шутливое слово или образ, но не сарказм, не насмешка над собеседником "
+               "или его ошибкой, не эмодзи и не восклицания. Смысл вопроса должен оставаться ясным.",
+}
+# The other rules outweigh one opening line at temperature 0 (a playful question came out word for word
+# the business one), so other tones repeat at the end with a sample from another case.
+TONE_REMINDERS = {
+    "business": "Тон — деловой: коротко, сухо, как на рабочей встрече. Пример тона на другом случае: "
+                "«Какой критерий определил выбор отдельного чанка для фильтров?»",
+    "playful": "Тон — шутливый: в вопросе должна быть лёгкая шутка, ироничное слово или образ. Пример тона "
+               "на другом случае: «Как вы вычислили, что главный тормоз страницы — модуль фильтров?»",
+}
+
 FALLBACK_QUESTIONS = {
     "clarify_task": "А что тогда случилось: какая была проблема или задача?",
     "get_case": "Какой один конкретный случай из работы вы могли бы рассказать?",
@@ -595,9 +617,11 @@ async def draft_question(settings, topic, intent, answer, state):
         "Используй их только для понимания терминов и нейтрального уточнения. Навык из справочника "
         "не подтверждает, что собеседник им владеет или применил его."
     ) if state.get("esco_skills") else ""
+    tone = state.get("intake", {}).get("tone", "friendly")
+    tone_reminder = f" {TONE_REMINDERS[tone]} Пример не копируй." if tone in TONE_REMINDERS else ""
     result = await ask_question(settings, SourcedQuestion if include_market else Question, (
-        "Ты интервьюер: дружелюбный коллега, которому правда интересна история. Пиши по-русски просто "
-        "и вежливо, без канцелярита. Задай один короткий вопрос по указанной цели: одно предложение, "
+        TONES[tone]
+        + " Задай один короткий вопрос по указанной цели: одно предложение, "
         "не длиннее 15 слов, вопросительный знак в самом конце. Назови в вопросе предмет случая из рассказа, "
         "чтобы было ясно, о чём речь, грамотно и без опечаток собеседника. Не пересказывай ответ, не хвали "
         "и не оценивай, не перечисляй варианты ответа и не приводи примеров. "
@@ -620,7 +644,7 @@ async def draft_question(settings, topic, intent, answer, state):
         "случаю, прежде чем исходить из этих условий. knowledge_gaps указывает, какой аспект похожего опыта "
         "стоит уточнить. conditions_to_clarify — возможные условия для уточнения, если они уместны. "
         "Спроси только о текущем случае. Не пересказывай чужой опыт и не подсказывай решение."
-    ) + market_instructions + esco_instructions, {"topic": topic, "goal": goal, "answer": excerpt, "facts": facts,
+    ) + market_instructions + esco_instructions + tone_reminder, {"topic": topic, "goal": goal, "answer": excerpt, "facts": facts,
                              **{key: state[key] for key in ("prior_project_context", "knowledge_gaps", "esco_skills")
                                 if key in state},
                              **({"market_context": market_context} if include_market else {}), **prompt_context(state)})

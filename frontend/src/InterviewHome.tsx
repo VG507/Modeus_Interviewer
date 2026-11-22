@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { api, ApiError, command, commandKeys, describe, type Context, type Interview, type Page, type ProjectContext } from './api';
+import {
+  api, ApiError, command, commandKeys, describe, tones, type Context, type Interview, type Page, type ProjectContext, type Tone,
+} from './api';
 
 const statusLabels = {
   active: 'В процессе',
@@ -44,7 +46,7 @@ function ProfileForm({ profile, catalog, busy, onSave, onCancel }: {
     if (filled.some(project => !project.task)) return setError('Опишите задачу каждого добавленного проекта.');
     setError('');
     onSave({ role, experience: read('experience'), responsibilities: read('responsibilities'),
-      conditions: read('conditions'), projects: filled });
+      conditions: read('conditions'), projects: filled, tone: (read('tone') || 'friendly') as Tone });
   }
 
   return <form onSubmit={save} className="interview-profile-form">
@@ -69,6 +71,12 @@ function ProfileForm({ profile, catalog, busy, onSave, onCancel }: {
           <label htmlFor="profile-responsibilities">Какими задачами вы обычно занимаетесь?</label>
           <textarea id="profile-responsibilities" name="responsibilities" defaultValue={profile?.responsibilities}
             maxLength={1000} rows={3} placeholder="Например, разрабатываю API и разбираю сбои в оплате" />
+        </div>
+        <div>
+          <label htmlFor="profile-tone">Как интервьюеру с вами говорить?</label>
+          <select id="profile-tone" name="tone" defaultValue={profile?.tone ?? 'friendly'}>
+            {Object.entries(tones).map(([value, title]) => <option key={value} value={value}>{title}</option>)}
+          </select>
         </div>
         <div>
           <label htmlFor="profile-conditions">Что важно знать о вашей работе?</label>
@@ -211,7 +219,8 @@ export function InterviewHome({ onOpen, onSessionExpired }: {
       </> : <>
         <p>Вспомните рабочий случай, о котором хотите рассказать.</p>
         <div className="interview-profile-summary">
-          <div><span>Ваша анкета</span><strong>{profile.role}</strong></div>
+          <div><span>Ваша анкета</span><strong>{profile.role}</strong>
+            <span>Тон интервьюера: {tones[profile.tone ?? 'friendly'].toLowerCase()}</span></div>
           <button type="button" className="quiet" disabled={!!busy} onClick={() => setEditing(true)}>Изменить анкету</button>
         </div>
         <button disabled={!!busy} onClick={create}>{busy === 'create' ? 'Создаём…' : 'Начать интервью'}</button>

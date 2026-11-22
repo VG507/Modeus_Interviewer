@@ -104,7 +104,11 @@ def test_max_invite_and_interview(database_url, monkeypatch):
             await bot.dispatch(callback(finish.replace("finish:", "finish-yes:")))
             await bot.settle()
             assert any("Добавлен индекс для отчёта." in body.get("text", "") for _, _, body in calls)
-            assert any(url.path == "/answers" and url.params["callback_id"] == "cb" for _, url, _ in calls)
+            callback_answers = [(method, url, body) for method, url, body in calls if url.path == "/answers"]
+            assert callback_answers
+            for method, url, body in callback_answers:
+                assert method == "POST" and url.params["callback_id"] == "cb"
+                assert body == {"notification": "Принято"}
             await bot.dispatch({"update_type": "bot_started", "user": {"user_id": 8}})
             assert buttons()[-1] == "new"
             with app.state.sessions() as db:

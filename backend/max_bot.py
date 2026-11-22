@@ -62,7 +62,7 @@ class MaxBot(TelegramBot):
     async def call(self, method, **params):
         if method == "answerCallbackQuery" and params.get("callback_query_id"):
             return await self.max_request("POST", "/answers", params={"callback_id": params["callback_query_id"]},
-                                          body={})
+                                          body={"notification": "Принято"})
         if method == "deleteMessage":
             return await self.max_request("DELETE", "/messages", params={"message_id": params["message_id"]})
         if method == "editMessageText":

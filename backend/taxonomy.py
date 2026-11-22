@@ -4,7 +4,11 @@ Applied on top of normalization: raw terms go through canonical_skill first,
 then the canonical skill is looked up here. Unknown skills get no category.
 """
 
+from collections import Counter, defaultdict
+
 from backend.textnorm import SKILL_ALIASES, canonical_skill
+
+OTHER = "other"
 
 TAXONOMY = {
     "languages": {
@@ -62,6 +66,24 @@ def term_taxonomy(raw):
     """(category, subcategory) for a raw term, normalized first; None if unknown."""
     canonical = canonical_skill(raw)
     return SKILL_TAXONOMY.get(canonical) if canonical else None
+
+
+def skill_breakdown(vacancy_skills):
+    """Vacancy counts per category and per skill, from one canonical skill list per vacancy.
+
+    A vacancy counts once per category it touches. Skills outside the taxonomy go
+    to "other". Busiest category first, "other" always last; skills likewise.
+    """
+    vacancies, skills = defaultdict(set), defaultdict(Counter)
+    for index, vacancy in enumerate(vacancy_skills):
+        for skill in set(vacancy):
+            category = SKILL_TAXONOMY.get(skill, (OTHER,))[0]
+            vacancies[category].add(index)
+            skills[category][skill] += 1
+    return [{"category": category, "vacancies": len(vacancies[category]),
+             "skills": [{"skill": skill, "subcategory": SKILL_TAXONOMY.get(skill, (None, None))[1], "vacancies": count}
+                        for skill, count in sorted(skills[category].items(), key=lambda item: (-item[1], item[0]))]}
+            for category in sorted(vacancies, key=lambda name: (name == OTHER, -len(vacancies[name]), name))]
 
 
 def dictionary_coverage():

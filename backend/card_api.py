@@ -6,18 +6,20 @@ from typing import Annotated, Generic, Literal, TypeVar
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
 from pydantic import BaseModel, Field, StrictBool, StringConstraints, model_validator
 from sqlalchemy import func, select
 
 from backend.catalog_topics import catalog_topic_columns, profession_for_card
 from backend.db import CardEvent, KnowledgeCard, Message, now
+from backend.embeddings import SIMILAR_MIN_SCORE, configured as embeddings_configured, refresh_index, search_cards, similar_cards
 from backend.http_errors import MESSAGES
 from backend.interview_api import Actor, CommandKey, PageSize, utc, versioned_command
 from backend.interview_engine import GAPS_PREFIX, LABELS
 from backend.interview_schemas import FactField, Identifier, ShortText, VersionedRequest
 from backend.knowledge import SECTIONS, cases_of, fact_skills, published_cards
 from backend.pagination import newest_page
+from backend.themes import THEME_MIN_SCORE, catalog_themes
 
 router = APIRouter(prefix="/api/v1")
 MIN_REVIEW_ITEMS = 2
@@ -25,6 +27,9 @@ REVIEW_HEADINGS = {label.casefold() for label in LABELS.values()}
 CardText = Annotated[str, StringConstraints(min_length=1, max_length=100_000)]
 Comment = Annotated[str, StringConstraints(strip_whitespace=True, max_length=4000)]
 AuthorName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+SearchLimit = Annotated[int, Field(ge=1, le=20)]
+ThemeThreshold = Annotated[float, Field(ge=0.5, le=0.95)]
+SIMILAR_LIMIT = 3
 
 
 class FactEdit(BaseModel):
@@ -141,6 +146,42 @@ class PublicSummary(BaseModel):
 class PublicCard(PublicSummary):
     content: dict
     text: str
+
+
+class SearchHit(PublicSummary):
+    score: float
+
+
+class SearchPage(BaseModel):
+    items: list[SearchHit]
+    mode: Literal["meaning", "words"]
+
+
+class ThemeSkill(BaseModel):
+    skill: str
+    cases: int
+
+
+class ThemeCell(BaseModel):
+    phi: float
+    cases: int
+
+
+class Theme(BaseModel):
+    title: str
+    card_id: str
+    cases: int
+    cards: list[PublicSummary]
+    skills: list[ThemeSkill]
+    matrix: list[ThemeCell]
+
+
+class ThemesPage(BaseModel):
+    threshold: float
+    cases: int
+    unthemed: int
+    categories: list[str]
+    themes: list[Theme]
 
 
 Item = TypeVar("Item")
@@ -436,7 +477,13 @@ def submit_card(request: Request, actor: Actor, key: CommandKey, card_id: Identi
 
 
 @router.post("/cards/{card_id}/review", response_model=CardView)
-def review_card(request: Request, actor: Actor, key: CommandKey, card_id: Identifier, body: ReviewCard):
+def review_card(request: Request, tasks: BackgroundTasks, actor: Actor, key: CommandKey, card_id: Identifier,
+                body: ReviewCard):
+    settings = request.app.state.settings
+    if body.decision == "accept" and embeddings_configured(settings):
+        # Runs after the response; the periodic index round picks the card up if this fails.
+        tasks.add_task(refresh_index, request.app.state.sessions, settings, [card_id])
+
     def apply(card, stamp, event_id):
         if card.publication_status != "in_review" or not matches_version(card.consent, card):
             raise HTTPException(409, "INVALID_STATE")
@@ -515,6 +562,46 @@ def catalog_topics(request: Request, response: Response):
     title = func.coalesce(query.selected_columns.topic_title, KnowledgeCard.content["title"].as_string())
     with request.app.state.sessions() as db:
         return {"items": list(db.scalars(query.with_only_columns(title).distinct().order_by(title)))}
+
+
+def summaries(db, hits):
+    """Public summaries of the scored card ids, in the order given."""
+    rows = {card.id: public_summary(card, title, profession) for card, _, title, profession in db.execute(
+        catalog_topic_columns(published_cards()).where(KnowledgeCard.id.in_([card_id for card_id, _ in hits])))}
+    return [SearchHit(**rows[card_id].model_dump(), score=round(score, 3)) for card_id, score in hits if card_id in rows]
+
+
+@router.get("/catalog/search", response_model=SearchPage)
+def search_catalog(request: Request, response: Response, q: ShortText, limit: SearchLimit = 10):
+    response.headers["Cache-Control"] = "no-store"
+    with request.app.state.sessions() as db:
+        hits, mode = search_cards(db, request.app.state.settings, q,
+                                  published_cards().with_only_columns(KnowledgeCard.id), limit)
+        return {"items": summaries(db, hits), "mode": mode}
+
+
+@router.get("/catalog/themes", response_model=ThemesPage)
+def catalog_theme_matrix(request: Request, response: Response, threshold: ThemeThreshold = THEME_MIN_SCORE):
+    response.headers["Cache-Control"] = "no-store"
+    with request.app.state.sessions() as db:
+        result = catalog_themes(db, request.app.state.settings.embedding_model, threshold)
+        cards = {hit.id: hit for hit in summaries(db, [(card_id, 1.0) for theme in result["themes"]
+                                                       for card_id in theme["card_ids"]])}
+        for theme in result["themes"]:
+            theme["cards"] = [cards[card_id] for card_id in theme.pop("card_ids") if card_id in cards]
+        return result
+
+
+@router.get("/catalog/{card_id}/similar", response_model=SearchPage)
+def similar_catalog_cards(request: Request, response: Response, card_id: Identifier):
+    response.headers["Cache-Control"] = "no-store"
+    settings = request.app.state.settings
+    with request.app.state.sessions() as db:
+        if db.scalar(published_cards().with_only_columns(KnowledgeCard.id).where(KnowledgeCard.id == card_id)) is None:
+            raise HTTPException(404, "CARD_NOT_FOUND", headers={"Cache-Control": "no-store"})
+        hits = similar_cards(db, settings.embedding_model, card_id,
+                             published_cards().with_only_columns(KnowledgeCard.id), SIMILAR_LIMIT)
+        return {"items": summaries(db, [hit for hit in hits if hit[1] >= SIMILAR_MIN_SCORE]), "mode": "meaning"}
 
 
 @router.get("/catalog/{card_id}", response_model=PublicCard)

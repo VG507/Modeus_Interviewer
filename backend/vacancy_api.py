@@ -13,6 +13,7 @@ from sqlalchemy.orm import load_only
 
 from backend.db import InterviewSession, VacancyCollection, now
 from backend.interview_api import Actor, utc
+from backend.taxonomy import skill_breakdown
 from backend.vacancy_import import claim_collection, collection_available, configured, run_collection
 from backend.vacancy_parser import profile_matches, role_key
 from backend.vacancy_samples import FRESH_FOR, current_sample, sample_is_fresh, trudvsem_samples
@@ -215,6 +216,9 @@ def vacancies(request: Request, actor: Actor, profession_id: str = "python_backe
             sample = trudvsem_samples(db, profession_id).get(profession_id)
             if sample:
                 cards.extend((card, "trudvsem") for card in sample.cards or [])
+        shown = [(card, provider) for card, provider in cards
+                 if (experience_band is None or card["experience_band"] == experience_band)
+                 and (level is None or card["level"] == level)]
         return {
             "configured": configured(request.app.state.settings),
             "profiles": [{"id": key, "title": title} for key, title in db.execute(select(
@@ -224,9 +228,8 @@ def vacancies(request: Request, actor: Actor, profession_id: str = "python_backe
             "stats": collection.stats,
             "total": len(cards),
             "cards": [{**{key: value for key, value in card.items() if key != "description"}, "source": provider}
-                      for card, provider in cards
-                      if (experience_band is None or card["experience_band"] == experience_band)
-                      and (level is None or card["level"] == level)],
+                      for card, provider in shown],
+            "skill_categories": skill_breakdown(card["skills"] for card, _ in shown),
         }
 
 

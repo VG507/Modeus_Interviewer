@@ -13,6 +13,7 @@ from backend.db import LlmResponse, LoginSession, User, VacancyCollection, copy_
 from backend.discovery import candidate_output, collect, item_entry, list_candidates
 from backend.discovery_fetch import CollectionError
 from backend.documentation import collect_documentation
+from backend.embeddings import index_cards
 from backend.github_evidence import process_pending
 from backend.hn import HackerNewsUnavailable, collect_hn
 from backend.llm import check_llm
@@ -84,6 +85,7 @@ def main():
     sub.add_parser("check-llm")
     forget = sub.add_parser("clear-llm-cache", help="Forget stored model answers so the model is asked again")
     forget.add_argument("--model", help="Only answers of this model")
+    sub.add_parser("embed-cards", help="Embed published cards whose text or embedding model changed")
     copy = sub.add_parser("copy-database", help="Copy all rows from another database into the empty DATABASE_URL")
     copy.add_argument("source", help="Source database URL, e.g. sqlite:///./.work/modeus.db")
     collect = sub.add_parser("import-vacancies", help="Refresh HH vacancies for one profile")
@@ -155,6 +157,15 @@ def main():
             # No exception body from HTTP clients: URLs may include credentials.
             print(str(exc) if type(exc) is RuntimeError else type(exc).__name__)
             raise SystemExit(1) from None
+        return
+    if args.command == "embed-cards":
+        engine, sessions = database(settings.database_url)
+        try:
+            print(json.dumps({"embedded": index_cards(sessions, settings)}))
+        except RuntimeError as exc:
+            parser.exit(1, f"embed-cards: {exc}\n")
+        finally:
+            engine.dispose()
         return
     if args.command == "copy-database":
         try:

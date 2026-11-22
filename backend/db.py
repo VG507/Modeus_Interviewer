@@ -360,6 +360,30 @@ class LlmResponse(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 
+class CardEmbedding(Base):
+    __tablename__ = "card_embeddings"
+    card_id: Mapped[str] = mapped_column(ForeignKey("knowledge_cards.id"), primary_key=True)
+    case_index: Mapped[int] = mapped_column(Integer, primary_key=True)
+    model: Mapped[str] = mapped_column(String(200))
+    text_hash: Mapped[str] = mapped_column(String(64))
+    # A unit vector as JSON text; the column is pgvector's vector type where the extension exists.
+    embedding: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class TextEmbedding(Base):
+    """Vector of any other text by its content, e.g. a vacancy duty."""
+    __tablename__ = "text_embeddings"
+    model: Mapped[str] = mapped_column(String(200), primary_key=True)
+    text_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    embedding: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+# Rebuilt from other tables, so a database copy leaves them for the target to recompute.
+DERIVED_TABLES = {"card_embeddings", "text_embeddings"}
+
+
 def database(url):
     options = {"check_same_thread": False} if url.startswith("sqlite:") else {}
     engine = create_engine(url, connect_args=options, pool_pre_ping=True)
@@ -394,6 +418,8 @@ def copy_database(source_url, target_url):
                 writer.execute(table.delete())
             copied = {}
             for table in Base.metadata.sorted_tables:
+                if table.name in DERIVED_TABLES:
+                    continue
                 rows = reader.execute(select(table))
                 copied[table.name] = 0
                 while batch := rows.fetchmany(COPY_BATCH):

@@ -52,6 +52,12 @@ export type PublicSummary = {
   author_name: string | null; reviewed_at: string;
 };
 export type PublicCard = PublicSummary & { content: CardContent; text: string };
+export type Theme = {
+  title: string; card_id: string; cases: number; cards: PublicSummary[];
+  skills: { skill: string; cases: number }[]; matrix: { phi: number; cases: number }[];
+};
+export type ThemesPage = { threshold: number; cases: number; unthemed: number; categories: string[]; themes: Theme[] };
+export type SearchPage = { items: (PublicSummary & { score: number })[]; mode: 'meaning' | 'words' };
 export type Page<T> = { items: T[]; next_cursor: string | null };
 
 const messages: Record<string, string> = {
@@ -141,3 +147,8 @@ export function commandKeys() {
     }
   };
 }
+
+export const skillCategories: Record<string, string> = {
+  languages: 'Языки', backend: 'Бэкенд', frontend: 'Фронтенд', databases: 'Базы данных',
+  messaging: 'Очереди и брокеры', devops: 'DevOps', testing: 'Тестирование', tools: 'Инструменты', other: 'Другое',
+};

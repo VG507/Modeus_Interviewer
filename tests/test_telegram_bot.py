@@ -297,3 +297,84 @@ def test_interview_stops_circling_without_new_cases(database_url, monkeypatch):
 
     with TestClient(app):
         asyncio.run(scenario())
+
+
+class VoiceTelegram(FakeTelegram):
+    """Also serves getFile and the file download a voice answer needs."""
+
+    def __call__(self, request):
+        if "/file/" in request.url.path:
+            self.calls.append(("download", {"path": request.url.path}))
+            return httpx.Response(200, content=b"OggS voice")
+        if request.url.path.endswith("/getFile"):
+            self.calls.append(("getFile", json.loads(request.content)))
+            return httpx.Response(200, json={"ok": True, "result": {"file_path": "voice/1.oga"}})
+        return super().__call__(request)
+
+
+def voice(user_id, duration=12):
+    return {"update_id": 1, "message": {"message_id": 1, "from": {"id": user_id}, "chat": {"id": user_id, "type": "private"},
+                                        "voice": {"file_id": "voice-1", "duration": duration, "file_size": 2048}}}
+
+
+def test_voice_answer_is_shown_and_sent_only_after_confirmation(database_url, monkeypatch):
+    from backend import speech
+
+    app, settings = make_app(database_url, monkeypatch, telegram_open_signup=True)
+    answers, heard = [], []
+
+    async def extract(settings, question, answer, state):
+        answers.append(answer["text"])
+        return Evidence(facts=[Candidate(field="task", quote="Медленный отчёт")], ambiguous=[], not_applicable=[],
+                        refused=False)
+
+    async def formulate(settings, topic, intent, answer, state):
+        return "Что вы сделали?"
+
+    def transcribe(settings, audio):
+        heard.append(audio)
+        return "Медленный отчёт, добавил индекс"
+
+    monkeypatch.setattr(interview_worker, "extract", extract)
+    monkeypatch.setattr(interview_worker, "formulate", formulate)
+    monkeypatch.setattr(speech, "transcribe", transcribe)
+    fake = VoiceTelegram()
+
+    async def scenario():
+        bot = make_bot(app, settings, fake)
+
+        async def send(*updates):
+            for update in updates:
+                await bot.dispatch(update)
+            await bot.settle()
+
+        try:
+            await send(message(7, "/start"), message(7, "/new"), message(7, "Python backend-разработчик"))
+            await send(press(7, "intake-skip"), press(7, "intake-skip"), press(7, "intake-skip"))
+            assert fake.texts()[-1].startswith("Вспомните один конкретный случай")
+
+            await send(voice(7))  # no model configured
+            assert fake.texts()[-1] == "Голосовые пока не распознаются. Напишите ответ текстом."
+            monkeypatch.setattr(speech, "configured", lambda settings: True)
+            await send(voice(7, duration=speech.MAX_VOICE_SECONDS + 1))
+            assert fake.texts()[-1].startswith("Голосовое длиннее 5 минут")
+
+            await send(voice(7))
+            assert heard == [b"OggS voice"] and answers == []  # shown, not sent yet
+            assert fake.texts()[-1].startswith("Я распознал:\n\n<blockquote>Медленный отчёт, добавил индекс</blockquote>")
+            assert {"voice-send", "voice-drop"} <= set(fake.buttons())
+            assert ("getFile", {"file_id": "voice-1"}) in fake.calls
+
+            await send(press(7, "voice-send"))
+            assert answers == ["Медленный отчёт, добавил индекс"]
+            assert fake.texts()[-1] == "Что вы сделали?"
+            await send(press(7, "voice-send"))
+            assert fake.texts()[-1] == "Это голосовое уже обработано."
+
+            await send(voice(7), press(7, "voice-drop"))
+            assert fake.texts()[-1] == "Хорошо, голосовое не отправлено." and len(answers) == 1
+        finally:
+            await bot.close()
+
+    with TestClient(app):
+        asyncio.run(scenario())

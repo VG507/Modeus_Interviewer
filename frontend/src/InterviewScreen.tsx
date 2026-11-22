@@ -192,8 +192,15 @@ export function InterviewScreen({ id, onSessionExpired }: { id: string; onSessio
       </div>}
       {canAnswer && currentQuestion && <form className="composer" onSubmit={event => { event.preventDefault(); void saveAnswer(true); }}>
         <label htmlFor="reply">Ваш ответ</label>
-        <textarea id="reply" rows={5} required maxLength={8000} value={text} disabled={!!busy}
-          onChange={event => setEditor({ question: currentQuestion.id, text: event.target.value })}/>
+        <textarea id="reply" rows={5} required maxLength={8000} value={text} disabled={!!busy} aria-describedby="reply-keys"
+          onChange={event => setEditor({ question: currentQuestion.id, text: event.target.value })}
+          onKeyDown={event => {
+            // Enter sends like the button; Shift+Enter breaks the line, and Enter that picks an IME word is left alone.
+            if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+            event.preventDefault();
+            if (!busy && !loadError && text.trim()) event.currentTarget.form?.requestSubmit();
+          }}/>
+        <p id="reply-keys" className="meta">Enter — отправить, Shift+Enter — новая строка.</p>
         <Dictation key={currentQuestion.id} disabled={!!busy || !!loadError} onText={spoken => setEditor(previous => {
           const current = previous && previous.question === currentQuestion.id ? previous.text : text;
           return { question: currentQuestion.id, text: (current.trimEnd() + ' ' + spoken).trim().slice(0, 8000) };

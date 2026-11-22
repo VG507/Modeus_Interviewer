@@ -7,11 +7,13 @@ by an exact scan. scripts/benchmark_vector_index.py on 20k rows: exact 47.7 ms, 
 which a migration on an empty table cannot give it.
 """
 
+from importlib import import_module
+
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0026"
-down_revision = "0025"
+revision = "0027"
+down_revision = "0026"
 branch_labels = None
 depends_on = None
 
@@ -28,6 +30,9 @@ def vector_column(bind):
 
 
 def upgrade():
+    # This migration first shipped as a second 0026, so a database marked 0026 may lack the MAX table.
+    if not op.get_context().as_sql and not sa.inspect(op.get_bind()).has_table("max_accounts"):
+        import_module("migrations.versions.0026_max_accounts").upgrade()
     if vector_column(op.get_bind()):
         op.execute(f"create index if not exists {INDEX} on card_embeddings "
                    f"using hnsw ((embedding::vector({DIMENSIONS})) vector_cosine_ops) where model = '{MODEL}'")

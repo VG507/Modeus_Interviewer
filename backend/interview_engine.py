@@ -424,6 +424,122 @@ FALLBACK_QUESTIONS = {
     "verification": "Как вы поняли, чем всё закончилось?",
     "alternative": "Какой другой рабочий случай вы могли бы рассказать?",
 }
+# FALLBACK_QUESTIONS is the friendly wording; other tones ask the same thing their way.
+TONED_FALLBACKS = {
+    "business": {
+        "clarify_task": "Какая была проблема или задача?",
+        "get_case": "Какой конкретный рабочий случай вы можете описать?",
+        "context": "Какие ограничения действовали: сроки, нагрузка, объём данных?",
+        "action": "Какие шаги вы предприняли: с чего начали и что делали дальше?",
+        "decision": "На каком основании вы выбрали этот вариант?",
+        "verification": "Как вы проверили результат?",
+        "alternative": "Какой другой рабочий случай вы можете описать?",
+    },
+    "playful": {
+        "clarify_task": "А с чего всё началось: какая проблема или задача свалилась на вас?",
+        "get_case": "Какую одну рабочую историю вы готовы рассказать?",
+        "context": "Что тогда сильнее всего вставляло палки в колёса: сроки, нагрузка, объём данных?",
+        "action": "С чего вы начали наступление на проблему и что пробовали потом?",
+        "decision": "Почему вы выбрали именно этот путь?",
+        "verification": "Как вы узнали, чем закончилась эта история?",
+        "alternative": "Какую другую рабочую историю вы могли бы рассказать?",
+    },
+}
+# Questions and prompts the interviewer writes without the model, by tone. The friendly texts are the
+# original wording that tests and running interviews rely on.
+FIXED_QUESTIONS = {
+    "rephrase_case": {
+        "friendly": "Не совсем понял, как это связано {case}. Что именно вы тогда сделали?",
+        "business": "Уточните, как это связано {case}. Что конкретно вы сделали?",
+        "playful": "Кажется, я потерял нить: как это связано {case}? Что именно вы тогда сделали?",
+    },
+    "rephrase_work": {
+        "friendly": "Нужен один конкретный случай, а не работа в целом. Что тогда случилось и что вы сделали?",
+        "business": "Нужен один конкретный случай, а не описание работы в целом. Что произошло и что вы сделали?",
+        "playful": "Давайте без обзора всей карьеры, один конкретный случай. Что тогда стряслось и что вы сделали?",
+    },
+    "participation": {
+        "friendly": "Что из этого вы делали сами, а что — коллеги или другая команда?",
+        "business": "Какую часть работы вы выполнили лично, а какую — коллеги или другая команда?",
+        "playful": "Где тут ваш личный вклад, а где постарались коллеги или соседняя команда?",
+    },
+    "get_case": {
+        "friendly": "Вспомните последний раз, когда в работе что-то пошло не по плану. Что тогда произошло?",
+        "business": "Опишите последний случай, когда работа пошла не по плану. Что произошло?",
+        "playful": "Вспомните последний раз, когда работа решила пойти своим путём. Что тогда произошло?",
+    },
+    "alternative": {
+        "friendly": "Ничего страшного. Расскажите любой другой случай: что произошло и что вы сделали?",
+        "business": "Хорошо. Расскажите другой случай: что произошло и что вы сделали?",
+        "playful": "Не беда, историй много. Расскажите любую другую: что произошло и что вы сделали?",
+    },
+    "clarify_verification": {
+        "friendly": "Тогда менялось несколько вещей. Как вы поняли, что помогло именно ваше изменение?",
+        "business": "Изменений было несколько. Как вы определили, что сработало именно ваше?",
+        "playful": "Тогда менялось сразу несколько вещей. Как вы вычислили, что помогло именно ваше изменение?",
+    },
+    "failed_verification": {
+        "friendly": "По каким признакам вы поняли, что это не сработало?",
+        "business": "По каким признакам вы определили, что решение не сработало?",
+        "playful": "Что выдало, что этот план не сработал?",
+    },
+    "aspect": {
+        "friendly": "Что можно уточнить в аспекте «{aspect}»?",
+        "business": "Что вы можете уточнить по аспекту «{aspect}»?",
+        "playful": "Что ещё любопытного было в аспекте «{aspect}»?",
+    },
+    "stalled": {
+        "friendly": "Похоже, сейчас сложно вспомнить подходящий случай — это нормально. Расскажите один случай "
+                    "целиком, от проблемы до результата (Например: «{example}».) Или вернитесь к интервью позже.",
+        "business": "Если подходящий случай сейчас не вспоминается, опишите один случай целиком, от проблемы "
+                    "до результата (Например: «{example}».) Или продолжите интервью позже.",
+        "playful": "Память иногда прячет лучшие истории — это нормально. Расскажите один случай целиком, "
+                   "от проблемы до развязки (Например: «{example}».) Или загляните к интервью позже.",
+    },
+    "wrapped": {
+        "friendly": "Похоже, про случай «{case}» главное мы выяснили. Расскажите другой рабочий случай, "
+                    "например: {examples}. Или нажмите «Завершить интервью», и я соберу карточку.",
+        "business": "По случаю «{case}» основное выяснено. Опишите другой рабочий случай, например: {examples}. "
+                    "Или нажмите «Завершить интервью», и я соберу карточку.",
+        "playful": "Историю «{case}» мы разобрали по косточкам. Расскажите другую, например: {examples}. "
+                   "Или нажмите «Завершить интервью», и я соберу карточку.",
+    },
+    "next_case": {
+        "friendly": "Давайте возьмём другой рабочий случай, например: {examples}. Что тогда произошло?",
+        "business": "Перейдём к другому рабочему случаю, например: {examples}. Что произошло?",
+        "playful": "Берём следующую историю, например: {examples}. Что тогда произошло?",
+    },
+    "same_topic": {
+        "friendly": "Вспомните ещё один случай по теме «{title}». Что тогда произошло и что вы сделали?",
+        "business": "Опишите ещё один случай по теме «{title}». Что произошло и что вы сделали?",
+        "playful": "А была ещё одна история по теме «{title}»? Что тогда произошло и что вы сделали?",
+    },
+    "opening": {
+        "friendly": "Расскажите о конкретном рабочем случае по теме «{title}».",
+        "business": "Опишите конкретный рабочий случай по теме «{title}».",
+        "playful": "Расскажите одну живую историю из работы по теме «{title}».",
+    },
+    "new_topic": {
+        "friendly": "Перейдём к теме «{title}». {question}",
+        "business": "Перейдём к теме «{title}». {question}",
+        "playful": "Переключаемся на тему «{title}». {question}",
+    },
+}
+
+
+def intake_tone(state):
+    return (state.get("intake") or {}).get("tone", "friendly")
+
+
+def fixed_question(key, tone, **fields):
+    """A question the interviewer asks without the model, in the expert's tone."""
+    texts = FIXED_QUESTIONS[key]
+    return texts.get(tone, texts["friendly"]).format(**fields)
+
+
+def fallback_question(intent, tone):
+    """The fixed question asked when the model's one is unusable, or None for an intent without one."""
+    return TONED_FALLBACKS.get(tone, FALLBACK_QUESTIONS).get(intent)
 # Episodes typical for a role show a participant with a broad reply what a concrete case is.
 CASE_EXAMPLES = {
     "python_backend": "медленный запрос или эндпоинт, падение сервиса, сложная миграция данных",
@@ -464,6 +580,23 @@ def case_examples(intake):
 
 def case_answer(intake):
     return CASE_ANSWERS.get(role_profession(intake), DEFAULT_CASE_ANSWER)
+
+
+def initial_question(job, state, intake, title, opening):
+    """The question that opens a case: the first one, one after a stall, or one for the next case."""
+    tone, examples = intake_tone({"intake": intake}), case_examples(intake)
+    if job.get("stalled"):
+        return fixed_question("stalled", tone, example=case_answer(intake))
+    if job.get("wrapped") and state.get("open_interview"):
+        return fixed_question("wrapped", tone, case=job["wrapped"], examples=examples)
+    if state.get("open_interview") and job.get("new_case"):
+        return fixed_question("next_case", tone, examples=examples)
+    if job.get("same_topic"):
+        return fixed_question("same_topic", tone, title=title)
+    question = opening or fixed_question("opening", tone, title=title)
+    if job.get("new_case"):
+        return fixed_question("new_topic", tone, title=title, question=question)
+    return f"{question} Например: {examples}." if state.get("open_interview") else question
 
 
 def with_answer_example(question, intent, state):
@@ -577,21 +710,16 @@ async def formulate_question(settings, topic, intent, answer, state):
 
 
 async def draft_question(settings, topic, intent, answer, state):
+    tone = intake_tone(state)
     if intent == "rephrase":
         if state["facts"]:
             case = f"со случаем «{state['discovered_topic']}»" if state.get("discovered_topic") else "с этим случаем"
-            return Question(text=f"Не совсем понял, как это связано {case}. Что именно вы тогда сделали?")
-        return Question(text="Нужен один конкретный случай, а не работа в целом. Что тогда случилось и что вы сделали?")
-    if intent == "participation":
-        return Question(text="Что из этого вы делали сами, а что — коллеги или другая команда?")
-    if intent == "get_case":
-        return Question(text="Вспомните последний раз, когда в работе что-то пошло не по плану. Что тогда произошло?")
-    if intent == "alternative":
-        return Question(text="Ничего страшного. Расскажите любой другой случай: что произошло и что вы сделали?")
-    if intent == "clarify_verification":
-        return Question(text="Тогда менялось несколько вещей. Как вы поняли, что помогло именно ваше изменение?")
+            return Question(text=fixed_question("rephrase_case", tone, case=case))
+        return Question(text=fixed_question("rephrase_work", tone))
+    if intent in {"participation", "get_case", "alternative", "clarify_verification"}:
+        return Question(text=fixed_question(intent, tone))
     if intent == "verification" and any(fact["field"] == "error" for fact in state["facts"]):
-        return Question(text="По каким признакам вы поняли, что это не сработало?")
+        return Question(text=fixed_question("failed_verification", tone))
     goal = INTENTS.get(intent)
     if goal is None:
         goal = f"Уточни неопределённость в аспекте «{LABELS[intent.removeprefix('clarify_')]}»."
@@ -617,7 +745,6 @@ async def draft_question(settings, topic, intent, answer, state):
         "Используй их только для понимания терминов и нейтрального уточнения. Навык из справочника "
         "не подтверждает, что собеседник им владеет или применил его."
     ) if state.get("esco_skills") else ""
-    tone = state.get("intake", {}).get("tone", "friendly")
     tone_reminder = f" {TONE_REMINDERS[tone]} Пример не копируй." if tone in TONE_REMINDERS else ""
     result = await ask_question(settings, SourcedQuestion if include_market else Question, (
         TONES[tone]
@@ -655,9 +782,8 @@ async def draft_question(settings, topic, intent, answer, state):
         if isinstance(result, SourcedQuestion) and result.source_number not in range(1, len(market_context) + 1):
             return Question(text=result.text)
         return result
-    return Question(text=FALLBACK_QUESTIONS.get(intent) or (
-        f"Что можно уточнить в аспекте «{LABELS[intent.removeprefix('clarify_')]}»?"
-    ))
+    return Question(text=fallback_question(intent, tone) or fixed_question(
+        "aspect", tone, aspect=LABELS[intent.removeprefix("clarify_")]))
 
 
 async def synthesize(settings, title, state):

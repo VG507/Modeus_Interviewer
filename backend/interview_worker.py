@@ -15,15 +15,15 @@ from backend.db import InterviewSession, KnowledgeCard, Message, Topic, now
 from backend.embeddings import case_vector
 from backend.esco import hints_for_question
 from backend.interview_engine import (
-    FALLBACK_QUESTIONS,
     InvalidModelOutput,
     apply_extraction,
-    case_answer,
-    case_examples,
     choose_intent,
     extract,
+    fallback_question,
     formulate,
     formulate_question,
+    initial_question,
+    intake_tone,
     render_card,
     synthesize,
 )
@@ -283,24 +283,7 @@ async def execute_stage(sessions, settings, interview_id, token):
 
     final_extraction = None
     if stage == "initial_question":
-        examples = case_examples(model_state["intake"])
-        if job.get("stalled"):
-            output = ("Похоже, сейчас сложно вспомнить подходящий случай — это нормально. Расскажите один случай "
-                      f"целиком, от проблемы до результата (Например: «{case_answer(model_state['intake'])}».) "
-                      "Или вернитесь к интервью позже.")
-        elif job.get("wrapped") and state.get("open_interview"):
-            output = (f"Похоже, про случай «{job['wrapped']}» главное мы выяснили. Расскажите другой рабочий случай, "
-                      f"например: {examples}. Или нажмите «Завершить интервью», и я соберу карточку.")
-        elif state.get("open_interview") and job.get("new_case"):
-            output = f"Давайте возьмём другой рабочий случай, например: {examples}. Что тогда произошло?"
-        elif job.get("same_topic"):
-            output = f"Вспомните ещё один случай по теме «{title}». Что тогда произошло и что вы сделали?"
-        else:
-            output = opening or f"Расскажите о конкретном рабочем случае по теме «{title}»."
-            if job.get("new_case"):
-                output = f"Перейдём к теме «{title}». {output}"
-            elif state.get("open_interview"):
-                output += f" Например: {examples}."
+        output = initial_question(job, state, model_state["intake"], title, opening)
     elif stage == "extraction":
         output = await extract(settings, question, answer, model_state)
     elif stage == "question":
@@ -375,7 +358,7 @@ async def execute_stage(sessions, settings, interview_id, token):
                     db.flush()
                     if ((publication_versions and not publication_versions_current(db, publication_versions))
                             or not skill_sources_current(db, skill_sources)):
-                        output = FALLBACK_QUESTIONS[job["intent"]]
+                        output = fallback_question(job["intent"], intake_tone(model_state))
                         market_sources = []
                 message = append_message(db, interview, kind="question", text=output, market_sources=market_sources or None)
                 interview.current_question_id = message.id

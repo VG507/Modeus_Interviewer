@@ -13,6 +13,7 @@ AnswerText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=
 FactField = Literal["task", "context", "action", "decision", "verification", "error", "limitation"]
 Responsibility = Literal["personal", "shared", "other", "unknown"]
 AnswerAssessment = Literal["relevant", "unclear", "unrelated", "declined"]
+Tone = Literal["friendly", "business", "playful"]
 OPEN_TOPIC_ID = "open-interview"
 
 
@@ -36,6 +37,8 @@ class InterviewContext(Schema):
     conditions: ContextText = ""
     # Keep the serialized request stable for idempotent replays from older clients.
     projects: list[ProjectContext] = Field(default_factory=list, max_length=3, exclude_if=lambda projects: not projects)
+    # How the interviewer words its questions; see TONES in interview_engine.
+    tone: Tone = Field(default="friendly", exclude_if=lambda tone: tone == "friendly")
 
 
 class CreateInterview(Schema):

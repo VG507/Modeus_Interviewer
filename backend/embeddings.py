@@ -9,7 +9,7 @@ import asyncio
 import json
 import logging
 
-from sqlalchemy import Float, cast, delete, select, tuple_
+from sqlalchemy import Float, String, cast, delete, literal, select, text, tuple_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import load_only
 
@@ -19,7 +19,7 @@ from backend.vacancy_context import keywords
 from backend.vacancy_parser import skill_hits
 from backend.vacancy_samples import fresh_vacancy_samples, trudvsem_samples
 from backend.vectors import (
-    EMBED_BATCH, SIMILAR_MIN_SCORE, CaseVector, Vector, cache_texts, configured, embed, pgvector_column, similarity,
+    EMBED_BATCH, SIMILAR_MIN_SCORE, CaseVector, Vector, cache_texts, configured, embed, pgvector_version, similarity,
     stored_vector, text_hash, unit,
 )
 
@@ -41,6 +41,9 @@ WORD_WEIGHT = 0.1
 # Cases ranked by meaning before words rerank them, and how many cases a card may take in a ranking.
 SEARCH_POOL = 50
 CASES_PER_CARD = 5
+# HNSW candidates per query (pgvector's default is 40): 100 gave recall@10 0.98 at 2.7 ms on 20k rows
+# in scripts/benchmark_vector_index.py, against 47.7 ms for the exact scan.
+INDEX_EF_SEARCH = 100
 FACT_SECTIONS = {"task": "task", "action": "actions", "decision": "decisions"}
 
 
@@ -124,16 +127,32 @@ def index_vacancy_duties(sessions, settings):
     return cache_texts(sessions, settings, duties)
 
 
+def nearest_cases_statement(model, vector, candidates, limit):
+    """The pgvector query for nearest_cases, shaped so the HNSW index of migration 0026 can serve it.
+
+    The index covers `embedding::vector(N)` where `model = '<model>'`, so the query casts the same
+    way and names the model as a literal: a bound value would hide the match from a generic plan.
+    """
+    dimensions = Vector(len(vector))
+    distance = cast(CardEmbedding.embedding, dimensions).op("<=>", return_type=Float)(cast(json.dumps(vector), dimensions))
+    return (select(CardEmbedding.card_id, CardEmbedding.case_index, 1 - distance)
+            .where(CardEmbedding.model == literal(model, String, literal_execute=True),
+                   CardEmbedding.card_id.in_(candidates))
+            .order_by(distance).limit(limit))
+
+
 def nearest_cases(db, model, vector, candidates, limit):
     """[(card id, case index, score)] of the cases of candidate cards (a select of ids) closest to vector."""
-    query = select(CardEmbedding.card_id, CardEmbedding.case_index).where(
-        CardEmbedding.model == model, CardEmbedding.card_id.in_(candidates))
-    if pgvector_column(db):
-        distance = CardEmbedding.embedding.op("<=>", return_type=Float)(cast(json.dumps(vector), Vector()))
-        return [tuple(row) for row in db.execute(query.add_columns(1 - distance).order_by(
-            distance, CardEmbedding.card_id, CardEmbedding.case_index).limit(limit))]
-    scored = [(card_id, index, similarity(vector, json.loads(stored)))
-              for card_id, index, stored in db.execute(query.add_columns(CardEmbedding.embedding))]
+    if version := pgvector_version(db):
+        # The index returns at most ef_search rows; a relaxed scan keeps going past rows the filter drops.
+        db.execute(text("select set_config('hnsw.ef_search', :value, true)"), {"value": str(max(INDEX_EF_SEARCH, limit))})
+        if version >= (0, 8):
+            db.execute(text("select set_config('hnsw.iterative_scan', 'relaxed_order', true)"))
+        scored = [tuple(row) for row in db.execute(nearest_cases_statement(model, vector, candidates, limit))]
+    else:
+        query = select(CardEmbedding.card_id, CardEmbedding.case_index, CardEmbedding.embedding).where(
+            CardEmbedding.model == model, CardEmbedding.card_id.in_(candidates))
+        scored = [(card_id, index, similarity(vector, json.loads(stored))) for card_id, index, stored in db.execute(query)]
     return sorted(scored, key=lambda item: (-item[2], item[0], item[1]))[:limit]
 
 

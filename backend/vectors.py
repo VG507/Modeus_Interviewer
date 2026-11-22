@@ -23,11 +23,14 @@ SIMILAR_MIN_SCORE = 0.6
 
 
 class Vector(UserDefinedType):
-    """pgvector's type, for casting JSON text to a vector in SQL."""
+    """pgvector's type, for casting JSON text to a vector in SQL; dimensions fix the size an index needs."""
     cache_ok = True
 
+    def __init__(self, dimensions=None):
+        self.dimensions = dimensions
+
     def get_col_spec(self, **kw):
-        return "vector"
+        return f"vector({self.dimensions})" if self.dimensions else "vector"
 
 
 def configured(settings):
@@ -77,16 +80,24 @@ def embed(settings, texts, timeout=None):
 _PGVECTOR = {}
 
 
-def pgvector_column(db):
-    """True when the embedding columns are pgvector's type, so similarity can run in SQL."""
+def pgvector_version(db):
+    """pgvector's version as a tuple when the embedding columns use its type, else None (search runs in Python)."""
     bind = db.get_bind()
     key = str(bind.engine.url)
     if key not in _PGVECTOR:
-        _PGVECTOR[key] = bind.dialect.name == "postgresql" and db.scalar(text(
+        _PGVECTOR[key] = None
+        if bind.dialect.name == "postgresql" and db.scalar(text(
             "select udt_name from information_schema.columns "
             "where table_name = 'card_embeddings' and column_name = 'embedding'"
-        )) == "vector"
+        )) == "vector":
+            version = db.scalar(text("select extversion from pg_extension where extname = 'vector'"))
+            _PGVECTOR[key] = tuple(int(part) for part in version.split(".")[:3] if part.isdigit())
     return _PGVECTOR[key]
+
+
+def pgvector_column(db):
+    """True when the embedding columns are pgvector's type, so similarity can run in SQL."""
+    return pgvector_version(db) is not None
 
 
 def stored_vector(db, vector):

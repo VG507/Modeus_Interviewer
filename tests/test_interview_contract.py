@@ -1,3 +1,4 @@
+import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,6 +9,7 @@ from alembic.config import Config
 from fastapi import HTTPException, Request
 from pydantic import ValidationError
 
+from backend import interview_engine
 from backend.db import User, database
 from backend.interview_api import create_interview, get_interview_profile, save_interview_profile
 from backend.interview_engine import prompt_context
@@ -89,3 +91,42 @@ def test_profile_reuses_older_intake_and_copies_updates_only_to_new_interviews(d
     model_intake = prompt_context({"intake": current["context"]})["intake"]
     assert model_intake["responsibilities"] == detail
     assert model_intake["projects"][0]["task"] == detail
+
+
+def test_tone_is_kept_in_the_profile_and_steers_only_the_instructions(database_url, monkeypatch):
+    assert "tone" not in InterviewContext(role="QA").model_dump()  # default requests keep their old shape
+    with pytest.raises(ValidationError):
+        InterviewContext(role="QA", tone="sarcastic")
+
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    command.upgrade(Config("alembic.ini"), "head")
+    _, sessions = database(database_url)
+    with sessions.begin() as db:
+        user = User(email="tone@example.test", password_hash="unused")
+        db.add(user)
+        db.flush()
+        owner = {"id": user.id}
+    origin = "http://localhost:5173"
+    app = SimpleNamespace(state=SimpleNamespace(sessions=sessions, app_origins={origin}))
+    request = Request({"type": "http", "app": app, "method": "POST", "path": "/api/v1/interviews",
+                       "headers": [(b"origin", origin.encode())]})
+    save_interview_profile(request, owner, InterviewContext(role="QA", tone="playful"))
+    assert get_interview_profile(request, owner)["tone"] == "playful"
+    context = create_interview(request, owner, "playful", CreateInterview())["context"]
+    assert context["tone"] == "playful"
+
+    captured = []
+
+    async def model(settings, schema, instructions, payload, check=None):
+        captured.append((instructions, payload))
+        return schema(text="Что вы тогда сделали?")
+
+    monkeypatch.setattr(interview_engine, "ask_model", model)
+    for tone in interview_engine.TONES:
+        state = {"facts": [], "intake": {**context, "tone": tone}, "recent_history": []}
+        asyncio.run(interview_engine.draft_question(None, "Тема", "action", {"text": "Ответ"}, state))
+    for (instructions, payload), tone in zip(captured, interview_engine.TONES):
+        assert instructions.startswith(interview_engine.TONES[tone] + " Задай один короткий вопрос")
+        reminder = interview_engine.TONE_REMINDERS.get(tone)
+        assert (reminder in instructions) if reminder else "Тон —" not in instructions
+        assert "tone" not in payload["intake"]  # an instruction, not a fact about the expert

@@ -2,6 +2,7 @@ from backend.taxonomy import (
     SKILL_TAXONOMY,
     TAXONOMY,
     dictionary_coverage,
+    skill_breakdown,
     skill_taxonomy,
     term_taxonomy,
 )
@@ -51,3 +52,23 @@ class TestLookup:
         assert term_taxonomy("Москва") is None  # blacklisted
         assert term_taxonomy("ClickHouse") is None  # unknown skill
         assert term_taxonomy("") is None
+
+
+class TestBreakdown:
+    def test_vacancy_counts_once_per_category(self):
+        breakdown = skill_breakdown([["postgresql", "mysql", "docker"], ["postgresql", "postgresql"], ["clickhouse"]])
+        assert [group["category"] for group in breakdown] == ["databases", "devops", "other"]
+        databases = breakdown[0]
+        assert databases["vacancies"] == 2
+        assert databases["skills"] == [
+            {"skill": "postgresql", "subcategory": "sql", "vacancies": 2},
+            {"skill": "mysql", "subcategory": "sql", "vacancies": 1},
+        ]
+        assert breakdown[2]["skills"] == [{"skill": "clickhouse", "subcategory": None, "vacancies": 1}]
+
+    def test_other_is_last_even_when_busiest(self):
+        breakdown = skill_breakdown([["clickhouse"], ["clickhouse"], ["git"]])
+        assert [group["category"] for group in breakdown] == ["tools", "other"]
+
+    def test_no_vacancies(self):
+        assert skill_breakdown([]) == []

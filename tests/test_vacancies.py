@@ -392,8 +392,12 @@ def test_latest_vacancy_sample_reaches_question_but_not_card(database_url, tmp_p
         assert active["running"] and active["progress"]["accepted"] == 7
         assert active["progress"]["details_reused"] == 3 and active["stats"]["vacancies"] == 1
         assert run_collection(sessions, settings, "python_backend", token, path)["error"] == "HH_EMPTY_SAMPLE"
-        assert len(client.get("/api/v1/vacancies?level=middle").json()["cards"]) == 1
-        assert client.get("/api/v1/vacancies?level=senior").json()["cards"] == []
+        middle = client.get("/api/v1/vacancies?level=middle").json()
+        assert len(middle["cards"]) == 1
+        databases = next(group for group in middle["skill_categories"] if group["category"] == "databases")
+        assert databases["vacancies"] == 1 and "postgresql" in {item["skill"] for item in databases["skills"]}
+        senior = client.get("/api/v1/vacancies?level=senior").json()
+        assert senior["cards"] == [] and senior["skill_categories"] == []
         login("participant")
         assert client.get("/api/v1/vacancies/overview").status_code == 403
         assert client.get("/api/v1/vacancies").status_code == 403

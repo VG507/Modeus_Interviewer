@@ -6,6 +6,10 @@ const experiences = {
 };
 const levels = { junior: 'Junior', middle: 'Middle', senior: 'Senior', lead: 'Lead' };
 const sources = { hh: 'HH', trudvsem: 'Работа России', file: 'Импорт из файла' };
+const skillCategories: Record<string, string> = {
+  languages: 'Языки', backend: 'Бэкенд', frontend: 'Фронтенд', databases: 'Базы данных',
+  messaging: 'Очереди и брокеры', devops: 'DevOps', testing: 'Тестирование', tools: 'Инструменты', other: 'Другое',
+};
 const errors: Record<string, string> = {
   HH_NOT_CONFIGURED: 'Укажи параметры HH в .env и перезапусти сервер.',
   HH_ALREADY_RUNNING: 'Для этого профиля уже идёт сбор.',
@@ -44,7 +48,10 @@ type Profile = {
   trudvsem?: { updated_at: string; vacancies: number; employers: number; stale: boolean; current_config: boolean } | null;
 };
 type Overview = { configured: boolean; profiles: Profile[] };
-type Listings = { cards: Vacancy[]; total: number };
+type SkillCategory = {
+  category: string; vacancies: number; skills: { skill: string; subcategory: string | null; vacancies: number }[];
+};
+type Listings = { cards: Vacancy[]; total: number; skill_categories: SkillCategory[] };
 type Candidate = { role: string; interviews: number };
 type ProfileDraft = { id?: string; title: string; search_query: string; aliases: string };
 
@@ -60,6 +67,12 @@ function Filter({ id, label, value, onChange, choices }: {
       {Object.entries(choices).map(([key, title]) => <option key={key} value={key}>{title}</option>)}
     </select>
   </div>;
+}
+
+// A vacancy's skills split by category, in the order of the sample's breakdown.
+function skillGroups(skills: string[], categories: SkillCategory[]) {
+  return categories.map(group => [group.category, skills.filter(skill => group.skills.some(item => item.skill === skill))] as const)
+    .filter(([, members]) => members.length);
 }
 
 export function Vacancies({ profile, collectionRefresh, onProfileSaved, onSessionExpired }: {
@@ -294,6 +307,14 @@ export function Vacancies({ profile, collectionRefresh, onProfileSaved, onSessio
       {hasSample && !collection && !listError && <p role="status">Загружаем вакансии…</p>}
       {hasSample && collection && <p className="market-muted">Показано {collection.cards.length} из {collection.total} вакансий</p>}
       {hasSample && collection?.cards.length === 0 && <p>По текущим фильтрам совпадений нет.</p>}
+      {hasSample && !!collection?.skill_categories.length && <section className="panel" aria-label="Навыки по направлениям">
+        <h2>Навыки по направлениям</h2>
+        <ul>{collection.skill_categories.map(group => <li key={group.category}>
+          <strong>{skillCategories[group.category] ?? group.category}</strong> · {group.vacancies} из {collection.cards.length}
+          {' · '}{group.skills.slice(0, 6).map(item => `${item.skill} ${item.vacancies}`).join(', ')}
+          {group.skills.length > 6 && ` и ещё ${group.skills.length - 6}`}
+        </li>)}</ul>
+      </section>}
       {hasSample && collection?.cards.map(card => <article className="panel" key={card.id}>
         <h2><a className="card-link" href={card.url} target="_blank" rel="noreferrer">{card.title}</a></h2>
         <p className="meta">{sources[card.source]}</p>
@@ -308,7 +329,11 @@ export function Vacancies({ profile, collectionRefresh, onProfileSaved, onSessio
         })}</ul></div>}
         {!!card.requirements?.length && <div><strong>Требования к кандидату</strong>
           <ul>{card.requirements.map(requirement => <li key={requirement}>{requirement}</li>)}</ul></div>}
-        {card.skills.length > 0 && <p><strong>Навыки и инструменты</strong> · {card.skills.join(', ')}</p>}
+        {card.skills.length > 0 && <div><strong>Навыки и инструменты</strong><ul>
+          {skillGroups(card.skills, collection.skill_categories).map(([category, skills]) => <li key={category}>
+            {skillCategories[category] ?? category}: {skills.join(', ')}
+          </li>)}
+        </ul></div>}
         {card.conditions.length > 0 && <div><strong>Условия работы</strong>
           <ul>{card.conditions.map(condition => <li key={condition}>{condition}</li>)}</ul></div>}
         {card.evidence.length > 0 && <details><summary>Основания</summary><ul>

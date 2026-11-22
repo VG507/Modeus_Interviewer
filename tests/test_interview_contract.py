@@ -130,3 +130,39 @@ def test_tone_is_kept_in_the_profile_and_steers_only_the_instructions(database_u
         reminder = interview_engine.TONE_REMINDERS.get(tone)
         assert (reminder in instructions) if reminder else "Тон —" not in instructions
         assert "tone" not in payload["intake"]  # an instruction, not a fact about the expert
+
+
+def test_fixed_questions_have_every_tone_with_the_same_blanks():
+    from string import Formatter
+
+    def blanks(text):
+        return {name for _, name, _, _ in Formatter().parse(text) if name}
+
+    for key, texts in interview_engine.FIXED_QUESTIONS.items():
+        assert set(texts) == set(interview_engine.TONES), key
+        assert all(blanks(text) == blanks(texts["friendly"]) for text in texts.values()), key
+    for tone, questions in interview_engine.TONED_FALLBACKS.items():
+        assert tone in interview_engine.TONES and set(questions) == set(interview_engine.FALLBACK_QUESTIONS)
+
+
+def test_fixed_questions_follow_the_tone():
+    def ask(intent, tone, facts=()):
+        state = {"facts": list(facts), "intake": {"role": "QA", "tone": tone}, "discovered_topic": "Флейки в CI"}
+        return asyncio.run(interview_engine.draft_question(None, "Тема", intent, None, state)).text
+
+    assert ask("get_case", "friendly") == ("Вспомните последний раз, когда в работе что-то пошло не по плану. "
+                                           "Что тогда произошло?")
+    assert ask("get_case", "playful") == interview_engine.FIXED_QUESTIONS["get_case"]["playful"]
+    assert ask("participation", "business") == interview_engine.FIXED_QUESTIONS["participation"]["business"]
+    assert ask("rephrase", "playful", [{"field": "task", "text": "Тесты падали"}]) == (
+        "Кажется, я потерял нить: как это связано со случаем «Флейки в CI»? Что именно вы тогда сделали?")
+
+    intake = {"role": "QA", "tone": "business"}
+    opened = interview_engine.initial_question({}, {}, intake, "Регресс", None)
+    assert opened == "Опишите конкретный рабочий случай по теме «Регресс»."
+    assert interview_engine.initial_question({}, {}, {"role": "QA"}, "Регресс", None) == (
+        "Расскажите о конкретном рабочем случае по теме «Регресс».")
+    moved = interview_engine.initial_question({"new_case": True}, {}, {**intake, "tone": "playful"}, "Регресс", "Как это было?")
+    assert moved == "Переключаемся на тему «Регресс». Как это было?"
+    assert interview_engine.fallback_question("decision", "business") == "На каком основании вы выбрали этот вариант?"
+    assert interview_engine.fallback_question("decision", "friendly") == interview_engine.FALLBACK_QUESTIONS["decision"]

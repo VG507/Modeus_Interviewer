@@ -17,6 +17,7 @@ from uuid import uuid4
 import httpx
 from sqlalchemy import delete, select
 
+from backend import speech
 from backend.catalog_topics import catalog_profiles
 from backend.db import LoginSession, TelegramAccount, TelegramInvite, User, now
 from backend.security import hash_password, token_hash
@@ -49,7 +50,7 @@ PROCESSING_ERRORS = {
     "INVALID_MODEL_OUTPUT": "Модель вернула ответ в неподходящем формате.",
 }
 ONE_SHOT = {"skip", "retry", "finish-yes", "finish-no", "intake-skip", "role", "layout-yes", "layout-no",
-            "publish", "publish-anon", "publish-name"}
+            "publish", "publish-anon", "publish-name", "voice-send", "voice-drop"}
 COMMANDS = [
     {"command": "new", "description": "Начать новое интервью"},
     {"command": "profile", "description": "Обновить анкету"},
@@ -306,6 +307,7 @@ class TelegramBot:
     account_model = TelegramAccount
     channel = "Telegram"
     no_access = NO_ACCESS
+    unsupported = "Я понимаю текстовые и голосовые сообщения."
 
     def __init__(self, app, settings, *, telegram_transport=None, client=None):
         self.sessions = app.state.sessions
@@ -490,8 +492,12 @@ class TelegramBot:
         if query:
             await self.flush(account)
             return await self.on_button(account, query)
+        voice = message.get("voice") or message.get("audio")
+        if not text and isinstance(voice, dict):
+            await self.flush(account)
+            return await self.on_voice(account, voice)
         if not text:
-            return await self.send(chat_id, "Я понимаю только текстовые сообщения.")
+            return await self.send(chat_id, self.unsupported)
         step = account.state.get("step")
         if command:
             await self.flush(account)
@@ -567,6 +573,11 @@ class TelegramBot:
             layout = account.state["layout"]
             account = await self.set_state(account, layout=None)
             await self.on_text(account, layout["fixed"] if action == "layout-yes" else layout["original"])
+        elif action == "voice-send":
+            await self.send_voice_answer(account)
+        elif action == "voice-drop":
+            await self.set_state(account, voice=None)
+            await self.send(account.chat_id, "Хорошо, голосовое не отправлено.")
         elif action == "skip":
             await self.skip(account, value)
         elif action == "finish":
@@ -644,6 +655,47 @@ class TelegramBot:
                 if exc.code != "VERSION_CONFLICT" or attempt:
                     raise
         self.follow(account.external_id)
+
+    async def on_voice(self, account, voice):
+        """Transcribe a voice answer and show it; it is sent only after the participant confirms."""
+        if not speech.configured(self.settings):
+            raise Notice("Голосовые пока не распознаются. Напишите ответ текстом.")
+        if account.state.get("step"):
+            raise Notice("Здесь нужен текстовый ответ.")
+        if (voice.get("duration") or 0) > speech.MAX_VOICE_SECONDS or (voice.get("file_size") or 0) > speech.MAX_VOICE_BYTES:
+            raise Notice(f"Голосовое длиннее {speech.MAX_VOICE_SECONDS // 60} минут. Разбейте ответ на части.")
+        detail = await self.request(account.user_id, "GET", self.interview_path(account))
+        require_question(detail)
+        await self.quietly("sendChatAction", chat_id=account.chat_id, action="typing")
+        try:
+            file = await self.call("getFile", file_id=voice.get("file_id"))
+            response = await self.client.get(f"{self.settings.telegram_api_url.rstrip('/')}/file/"
+                                             f"bot{self.settings.telegram_bot_token}/{file['file_path']}")
+            response.raise_for_status()
+        except (TelegramError, httpx.HTTPError, KeyError, TypeError):
+            raise Notice("Не удалось скачать голосовое. Отправьте его ещё раз.") from None
+        try:
+            text = await asyncio.to_thread(speech.transcribe, self.settings, response.content)
+        except Exception:
+            logger.exception("Voice transcription failed")
+            raise Notice("Не удалось распознать голосовое. Попробуйте ещё раз или напишите текстом.") from None
+        if not text:
+            raise Notice("Речь не разобрать. Попробуйте ещё раз или напишите текстом.")
+        text = text[:ANSWER_LIMIT]
+        await self.set_state(account, voice={"question_id": detail["current_question_id"], "text": text})
+        await self.send(account.chat_id, f"Я распознал:\n\n<blockquote>{escape(text)}</blockquote>\n\n"
+                                          "Отправить как ответ? Чтобы поправить, пришлите исправленный текст сообщением.",
+                        [[("Отправить", "voice-send"), ("Не отправлять", "voice-drop")]])
+
+    async def send_voice_answer(self, account):
+        draft = account.state.get("voice")
+        if not draft:
+            raise Notice("Это голосовое уже обработано.")
+        account = await self.set_state(account, voice=None)
+        detail = await self.request(account.user_id, "GET", self.interview_path(account))
+        if detail.get("current_question_id") != draft["question_id"]:
+            raise Notice("Вопрос уже сменился. Ответьте на текущий вопрос.")
+        await self.submit_answer(account, draft["text"])
 
     async def new_interview(self, account):
         profile = await self.request(account.user_id, "GET", "/interview-profile")

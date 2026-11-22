@@ -17,6 +17,8 @@ class MaxBot(TelegramBot):
     account_model = MaxAccount
     channel = "MAX"
     no_access = "Попросите у команды Modeus одноразовое приглашение и отправьте /start с полученным кодом."
+    # Voice answers are recognised in Telegram only.
+    unsupported = "Я понимаю только текстовые сообщения."
 
     def __init__(self, app, settings, *, transport=None):
         tls = ssl.create_default_context()

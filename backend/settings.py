@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     hn_collection_enabled: bool = True
     github_token: str = Field(default="", repr=False)
     openalex_api_key: str = Field(default="", repr=False)
+    # faster-whisper model for voice answers in Telegram, e.g. large-v3-turbo; empty keeps voice off.
+    speech_model: str = ""
+    speech_language: str = "ru"
     telegram_bot_token: str = Field(default="", repr=False)
     telegram_api_url: str = "https://api.telegram.org"
     telegram_open_signup: bool = False

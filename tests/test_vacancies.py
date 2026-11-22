@@ -220,6 +220,37 @@ def test_reviewed_sources_require_applicability_and_rank_by_purpose(database_url
     engine.dispose()
 
 
+def test_profession_kind_weights_break_relevance_ties(database_url, monkeypatch):
+    url = database_url
+    monkeypatch.setenv("DATABASE_URL", url)
+    command.upgrade(Config("alembic.ini"), "head")
+    engine, sessions = database(url)
+    quote = "Проверяли план выполнения и считали медиану на одинаковых данных."
+    base = {
+        "profession_id": "python_backend", "title": "Источник", "url": "https://example.org/source",
+        "text": quote, "quote": quote, "task": "Медленный запрос отчёта PostgreSQL", "purpose": "implementation",
+    }
+    docs = {**base, "id": "docs", "kind": "documentation", "detail": "план выполнения"}
+    research = {**base, "id": "research", "kind": "research", "detail": "считали медиану",
+                "technology": "PostgreSQL", "version": "16"}
+    intake = {"role": "Python backend"}
+    state = {"facts": [{"field": "task", "text": "Ускоряли медленный запрос отчёта PostgreSQL 16.2."}]}
+
+    with sessions.begin() as db:
+        assert import_excerpts(db, [research, docs]) == 2
+        # Equal relevance: the profession weight (documentation 1.0 > research 0.2) outranks the version bonus.
+        assert [x["excerpt_id"] for x in sources_for_followup(db, intake, state, "action")] == ["docs", "research"]
+
+        db.add(VacancyCollection(profession_id="ml_engineer", title="ML engineer", title_key="ml engineer",
+                                 aliases=["ML инженер"], approved=True, stats={}, config_version=1))
+        ml = {"profession_id": "ml_engineer"}
+        assert import_excerpts(db, [{**research, **ml, "id": "ml-research"}, {**docs, **ml, "id": "ml-docs"}]) == 2
+        # For ML the weight order is reversed: research 1.0 > documentation 0.8.
+        ml_hints = sources_for_followup(db, {"role": "ML engineer"}, state, "action")
+        assert [x["excerpt_id"] for x in ml_hints] == ["ml-research", "ml-docs"]
+    engine.dispose()
+
+
 @pytest.mark.parametrize(("text", "number", "expected"), [
     ("Как вы проверили результат?", 1, 1),
     ("Как вы проверили результат?", 7, None),

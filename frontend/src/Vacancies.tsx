@@ -249,7 +249,7 @@ export function Vacancies({ profile, visible, collectionRefresh, onProfileSaved,
         <button type="button" className="secondary" disabled={busy} onClick={() => void loadCandidates()}>Роли из интервью</button>
       </div>
       {candidateError && <p role="alert">{candidateError}</p>}
-      {candidates && (candidates.length ? <ul aria-label="Новые роли из интервью">{candidates.map(item => <li key={item.role}>
+      {candidates && (candidates.length ? <ul className="source-list" aria-label="Новые роли из интервью">{candidates.map(item => <li key={item.role}>
         <button className="quiet" type="button" disabled={busy} onClick={() => newProfile(item.role)}>
           {item.role} · Интервью: {item.interviews}
         </button>

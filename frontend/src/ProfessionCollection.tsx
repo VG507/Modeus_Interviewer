@@ -99,43 +99,40 @@ function shouldRefreshMaterials(previous: Run | null, next: Run | null) {
     active.has(step.status) && !active.has(next.steps[source]?.status ?? '')));
 }
 
-function VacancySample({ label, sample }: { label: string; sample: VacancyQuality }) {
-  const date = sample.checked_at && new Date(sample.checked_at).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' });
-  return <li><a href="#/data/vacancies">{label}</a>{date ? <>
-    {' · выборка от '}{date} · {sample.vacancies} вакансий, {sample.employers} работодателей
-    {' · '}{sample.fresh ? 'свежая' : 'срок актуальности истёк'}
-    {(!(sample.approved && sample.current_config) || sample.review?.status === 'pending') && ' · требуется проверка'}
-    {sample.approved && sample.current_config && sample.review?.status === 'automatic' && ' · подтверждена автоматически'}
-    {sample.source === 'file' && ' · импорт из файла'}
-  </> : ' · выборки пока нет'}</li>;
+function qualityNote(source: string, quality: Quality | null): string {
+  if (!quality) return '';
+  if (source === 'hh' || source === 'trudvsem') {
+    const sample = source === 'hh' ? quality.hh : quality.trudvsem;
+    if (!sample?.checked_at) return 'выборки пока нет';
+    const date = new Date(sample.checked_at).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' });
+    const review = !sample.approved || !sample.current_config || sample.review?.status === 'pending'
+      ? ' · требуется проверка' : sample.review?.status === 'automatic' ? ' · подтверждена автоматически' : '';
+    return `выборка от ${date} · ${sample.vacancies} вакансий, ${sample.employers} работодателей` +
+      (sample.fresh ? '' : ' · требует обновления') + review + (sample.source === 'file' ? ' · импорт из файла' : '');
+  }
+  if (source === 'esco') return quality.esco?.sample ? `навыков: ${quality.esco.sample.skills}` : '';
+  const counters = quality.materials[source as keyof Quality['materials']];
+  if (!counters) return '';
+  if (source === 'github') {
+    const pending = counters.automatic_check ?? 0;
+    return `допущено ${counters.accepted ?? 0} · ожидают автопроверки ${pending}` +
+      (pending > 0 && !quality.automatic_check_enabled ? ' · модель не настроена' : '') +
+      ` · наблюдение, отклонено или просрочено ${(counters.observe ?? 0) + (counters.rejected ?? 0) + (counters.expired ?? 0)}`;
+  }
+  if (source === 'docs') {
+    const pending = quality.documentation_pending ?? (counters.new ?? 0) + (counters.review ?? 0);
+    return `допущено ${counters.accepted ?? 0} · к проверке ${pending}`;
+  }
+  if (source === 'trends') return `сигналов популярности: ${counters.observe ?? 0}`;
+  if (source === 'habr') return `допущено ${counters.accepted ?? 0} · ждут проверки ${counters.new ?? 0}` +
+    ` · наблюдаем ${counters.observe ?? 0} · срок проверки истёк ${counters.expired ?? 0}`;
+  const pending = (counters.new ?? 0) + (counters.observe ?? 0);
+  const rejected = (counters.rejected ?? 0) + (counters.expired ?? 0);
+  return `допущено ${counters.accepted ?? 0} · ${source === 'openalex' ? 'кандидаты' : 'наблюдение'} ${pending}` +
+    ` · отклонено или просрочено ${rejected}`;
 }
 
-function QualitySummary({ quality, onReviewDocumentation }: { quality: Quality; onReviewDocumentation: () => void }) {
-  const { hh, trudvsem, materials } = quality;
-  const { github, docs, trends, openalex: research, skills, habr } = materials;
-  const pending = quality.documentation_pending ?? (docs.new ?? 0) + (docs.review ?? 0);
-  return <ul>
-    <VacancySample label={hh.source === 'file' ? 'Вакансии из файла' : 'Вакансии HH'} sample={hh}/>
-    {trudvsem ? <VacancySample label="Работа России" sample={trudvsem}/> :
-      <li><a href="#/data/vacancies">Работа России</a> · выборки пока нет</li>}
-    <li>GitHub Issues · допущено {github.accepted ?? 0} · ожидают автопроверки {github.automatic_check ?? 0}
-      {(github.automatic_check ?? 0) > 0 && !quality.automatic_check_enabled && ' · модель не настроена'}
-      {' · наблюдение, отклонено или просрочено '}
-      {(github.observe ?? 0) + (github.rejected ?? 0) + (github.expired ?? 0)}</li>
-    <li>Документация · допущено {docs.accepted ?? 0} · к проверке {pending}
-      {pending > 0 && <> <button type="button" className="secondary" onClick={onReviewDocumentation}>
-        Открыть документацию</button></>}</li>
-    <li>GitHub Trends · {trends.observe ?? 0} сигналов популярности. Hacker News · кандидаты по технологиям и активности обсуждения.</li>
-    {research && <li>Научные статьи · допущено {research.accepted ?? 0} · кандидаты {(research.new ?? 0) + (research.observe ?? 0)}
-      {' · отклонено или просрочено '}{(research.rejected ?? 0) + (research.expired ?? 0)}</li>}
-    {skills && <li>Agent Skills · допущено {skills.accepted ?? 0} · наблюдение {(skills.new ?? 0) + (skills.observe ?? 0)}
-      {' · отклонено или устарело '}{(skills.rejected ?? 0) + (skills.expired ?? 0)}</li>}
-    {habr && <li>Хабр · допущено {habr.accepted ?? 0} · ждут проверки {habr.new ?? 0}
-      {' · наблюдаем '}{habr.observe ?? 0}{' · срок проверки истёк '}{habr.expired ?? 0}</li>}
-  </ul>;
-}
-
-function EscoPanel({ esco, path, busy, onCollect, onSaved, onSessionExpired }: {
+export function EscoPanel({ esco, path, busy, onCollect, onSaved, onSessionExpired }: {
   esco: EscoQuality; path: string; busy: boolean; onCollect: () => void;
   onSaved: () => void; onSessionExpired: () => void;
 }) {
@@ -226,10 +223,7 @@ function EscoPanel({ esco, path, busy, onCollect, onSaved, onSessionExpired }: {
   </section>;
 }
 
-export function ProfessionCollection({ profession, showSourceDetails, onSessionExpired, onCompleted, onReviewDocumentation }: {
-  profession: string; showSourceDetails: boolean; onSessionExpired: () => void; onCompleted: () => void;
-  onReviewDocumentation: () => void;
-}) {
+export function useCollectionStatus(profession: string, onSessionExpired: () => void, onCompleted: () => void) {
   const [run, setRun] = useState<Run | null>(null);
   const [quality, setQuality] = useState<Quality | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -243,7 +237,7 @@ export function ProfessionCollection({ profession, showSourceDetails, onSessionE
   useEffect(() => () => request.current?.abort(), []);
 
   useEffect(() => {
-    if (starting) return;
+    if (starting || !profession) return;
     const controller = new AbortController();
     const { signal } = controller;
     let timer: number | undefined;
@@ -301,39 +295,54 @@ export function ProfessionCollection({ profession, showSourceDetails, onSessionE
     }
   }
 
-  const visibleSteps = Object.entries(run?.steps ?? {}).filter(([key]) =>
-    showSourceDetails || key === 'hh' || key === 'trudvsem');
-  const steps = visibleSteps.map(([, step]) => step);
+  return { run, quality, starting, startError, loadError, start,
+    refreshQuality: () => setQualityRevision(value => value + 1) };
+}
+
+export type CollectionStatus = ReturnType<typeof useCollectionStatus>;
+
+export function CollectionOverview({ status, vacanciesOnly }: { status: CollectionStatus; vacanciesOnly: boolean }) {
+  const { run, quality, starting, startError, loadError, start } = status;
+  const visibleSources = vacanciesOnly ? ['hh', 'trudvsem'] :
+    Array.from(new Set([...Object.keys(sources), ...Object.keys(run?.steps ?? {})]));
+  const steps = visibleSources.flatMap(source => run?.steps[source] ? [run.steps[source]] : []);
   const settled = steps.filter(step => !active.has(step.status)).length;
   return <div className="panel stack">
     <div className="actions">
       <button type="button" disabled={starting || run?.running} onClick={() => void start()}>
         {starting || run?.running ? 'Сбор запущен' : 'Собрать данные по профессии'}
       </button>
-      {!showSourceDetails && <button type="button" className="secondary" disabled={starting || run?.running}
-        onClick={() => void start(undefined, 'vacancies')}>Собрать только вакансии</button>}
+      <button type="button" className="secondary" disabled={starting || run?.running}
+        onClick={() => void start(undefined, 'vacancies')}>Собрать только вакансии</button>
       {!!steps.length && <span role="status">{settled < steps.length ? `Завершено этапов: ${settled} из ${steps.length}` :
-        `${showSourceDetails ? 'Готово' : 'Источников вакансий обновлено'}: ${steps.filter(step => step.status === 'ok').length} из ${steps.length}`}</span>}
-      {!showSourceDetails && <a href="#/data/sources">Результаты по источникам</a>}
+        `${vacanciesOnly ? 'Источников вакансий обновлено' : 'Готово'}: ${steps.filter(step => step.status === 'ok').length} из ${steps.length}`}</span>}
+      {vacanciesOnly && <a href="#/data">Результаты по источникам</a>}
     </div>
     {startError && <p role="alert">{startError}</p>}
     {loadError && <p role="alert">{loadError}</p>}
-    {run && steps.length > 0 && <ul aria-label="Результаты сбора">
-      {visibleSteps.map(([source, step]) => {
-        const label = sources[source] ?? source;
-        return <li key={source}><strong>{label}</strong> · {statuses[step.status] ?? step.status}
-          {step.found !== undefined && <> · кандидатов {step.found}</>}
-          {step.collected !== undefined && <> · {source === 'openalex' ? 'проверено' :
-            source === 'esco' ? 'навыков' : 'собрано или обновлено'} {step.collected}</>}
-          {step.accepted !== undefined && <> · допущено к интервью {step.accepted}</>}
-          {step.changed !== undefined && <> · новых или изменённых версий {step.changed}</>}
-          {!!step.busy && <> · уже обновляется {step.busy}</>}
-          {step.code && <> · {messages[step.code] ?? step.code}</>}
-          {!run.running && retryable.has(step.status) &&
-            <> <button className="secondary" type="button" disabled={starting}
-              onClick={() => void start(source)}>Повторить {label}</button></>}
-          {step.errors && Object.entries(step.errors).map(([target, error]) => <p key={target}>{error}</p>)}
-          {!!step.items?.length && <details>
+    {(run || quality) && <ul className="source-list" aria-label="Состояние источников">
+      {visibleSources.map(source => {
+        const step = run?.steps[source];
+        const note = qualityNote(source, quality);
+        if (!step && !note) return null;
+        const label = source === 'hh' && quality?.hh.source === 'file' ? 'Вакансии из файла' : sources[source] ?? source;
+        return <li key={source}><strong>{label}</strong>
+          {step && <> · {statuses[step.status] ?? step.status}
+            {step.found !== undefined && <> · кандидатов {step.found}</>}
+            {step.collected !== undefined && <> · {source === 'openalex' ? 'проверено' :
+              source === 'esco' ? 'навыков' : 'собрано'} {step.collected}</>}
+            {step.accepted !== undefined && <> · допущено {step.accepted}</>}
+            {step.changed !== undefined && <> · новых версий {step.changed}</>}
+            {!!step.busy && <> · уже обновляется {step.busy}</>}
+            {step.code && <> · {messages[step.code] ?? step.code}</>}
+          </>}
+          {note && <> · {note}</>}
+          {source === 'docs' && <a href="#/data/docs">Открыть документацию</a>}
+          {step && !run?.running && retryable.has(step.status) &&
+            <button className="secondary retry-step" type="button" disabled={starting}
+              onClick={() => void start(source)}>Повторить {label}</button>}
+          {step?.errors && Object.entries(step.errors).map(([target, error]) => <p key={target}>{error}</p>)}
+          {!!step?.items?.length && <details>
             <summary>Кандидаты из последнего сбора</summary>
             <ul>{step.items.map(item => <li key={item.id}>
               <a href={item.url} target="_blank" rel="noreferrer">{item.title}</a> · рейтинг {item.score}
@@ -342,18 +351,5 @@ export function ProfessionCollection({ profession, showSourceDetails, onSessionE
         </li>;
       })}
     </ul>}
-    {quality?.esco && <div hidden={!showSourceDetails}>
-      <EscoPanel esco={quality.esco} path={path + '/esco'} busy={starting || !!run?.running}
-        onCollect={() => void start(undefined, 'esco')} onSaved={() => setQualityRevision(value => value + 1)}
-        onSessionExpired={onSessionExpired}/>
-    </div>}
-    {showSourceDetails && <>
-      <h2>Качество материалов</h2>
-      {quality && <QualitySummary quality={quality} onReviewDocumentation={onReviewDocumentation}/>}
-      <p className="meta">Профиль для интервью подтверждается во вкладке «Вакансии».
-        Допуск выдержек из документации находится в деталях материала, в блоке «Решение модератора».</p>
-      <p className="meta">Для интервью проверяются цитата, задача и применимость материала. Популярность
-        используется для отбора кандидатов в GitHub Trends и Hacker News и для сортировки статей Хабра, когда доступен рейтинг.</p>
-    </>}
   </div>;
 }

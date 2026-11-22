@@ -1,0 +1,3420 @@
+{
+ "demo": true,
+ "note": "Выдуманные данные для показа сводки. Ссылки ведут на example.org, это не реальные вакансии, не реальные записи ESCO и O*NET и не реальные интервью.",
+ "profession": {
+  "id": "python_backend",
+  "title": "Python backend"
+ },
+ "vacancies": [
+  {
+   "id": "demo-hh-1000",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1000",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-10-28",
+   "level": "middle",
+   "skills": [
+    "celery",
+    "docker",
+    "fastapi",
+    "linux",
+    "postgresql",
+    "python"
+   ],
+   "tasks": [
+    "Разработка фоновых задач на Celery",
+    "Декомпозиция монолита на микросервисы",
+    "Контейнеризация сервисов и выкладка через CI/CD"
+   ],
+   "requirements": [
+    "Понимание асинхронного программирования (asyncio)",
+    "Понимание принципов работы индексов и транзакций"
+   ]
+  },
+  {
+   "id": "demo-hh-1001",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1001",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-10-29",
+   "level": "middle",
+   "skills": [
+    "ci/cd",
+    "docker",
+    "git",
+    "postgresql",
+    "prometheus",
+    "python",
+    "sql"
+   ],
+   "tasks": [
+    "Проектирование схемы базы данных PostgreSQL",
+    "Разбор инцидентов в продакшене и устранение причин",
+    "Декомпозиция монолита на микросервисы"
+   ],
+   "requirements": [
+    "Понимание принципов работы индексов и транзакций",
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL",
+    "Понимание ООП, SOLID и паттернов проектирования",
+    "Опыт работы с Docker, понимание CI/CD"
+   ]
+  },
+  {
+   "id": "demo-hh-1002",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1002",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-13",
+   "level": "middle",
+   "skills": [
+    "asyncio",
+    "docker",
+    "fastapi",
+    "git",
+    "postgresql",
+    "python",
+    "rest"
+   ],
+   "tasks": [
+    "Разбор инцидентов в продакшене и устранение причин",
+    "Разработка REST API на FastAPI",
+    "Интеграция с внешними сервисами по REST и gRPC"
+   ],
+   "requirements": [
+    "Знание принципов REST и проектирования API",
+    "Понимание асинхронного программирования (asyncio)"
+   ]
+  },
+  {
+   "id": "demo-hh-1003",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1003",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-10-20",
+   "level": "middle",
+   "skills": [
+    "celery",
+    "ci/cd",
+    "docker",
+    "git",
+    "linux",
+    "python",
+    "rabbitmq",
+    "redis",
+    "rest",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Разработка и поддержка сервисов на Django и DRF",
+    "Обмен сообщениями между сервисами через RabbitMQ",
+    "Разработка фоновых задач на Celery",
+    "Проектирование API для мобильного и веб-клиентов"
+   ],
+   "requirements": [
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL",
+    "Опыт работы с Redis"
+   ]
+  },
+  {
+   "id": "demo-hh-1004",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1004",
+   "title": "Junior Python-разработчик",
+   "published_at": "2026-10-31",
+   "level": "junior",
+   "skills": [
+    "ci/cd",
+    "fastapi",
+    "python",
+    "rabbitmq",
+    "redis",
+    "rest",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Разработка и поддержка REST API на FastAPI",
+    "Написание и сопровождение миграций данных"
+   ],
+   "requirements": [
+    "Понимание асинхронного программирования (asyncio)",
+    "Опыт написания тестов на pytest",
+    "Опыт работы с Docker, понимание CI/CD",
+    "Понимание принципов работы HTTP"
+   ]
+  },
+  {
+   "id": "demo-hh-1005",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1005",
+   "title": "Junior Python-разработчик",
+   "published_at": "2026-11-02",
+   "level": "junior",
+   "skills": [
+    "asyncio",
+    "django",
+    "git",
+    "linux",
+    "postgresql",
+    "pytest",
+    "python",
+    "rabbitmq",
+    "rest",
+    "sql",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Написание unit- и интеграционных тестов",
+    "Разработка и поддержка сервисов на Django и DRF",
+    "Оптимизация медленных SQL-запросов"
+   ],
+   "requirements": [
+    "Знание принципов REST и проектирования API",
+    "Понимание принципов работы индексов и транзакций"
+   ]
+  },
+  {
+   "id": "demo-hh-1006",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1006",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-10-29",
+   "level": "middle",
+   "skills": [
+    "ci/cd",
+    "docker",
+    "grafana",
+    "kafka",
+    "kubernetes",
+    "postgresql",
+    "python",
+    "rabbitmq",
+    "redis",
+    "sql",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Проектирование схемы базы данных PostgreSQL",
+    "Настройка мониторинга и алертов сервисов"
+   ],
+   "requirements": [
+    "Опыт настройки мониторинга (Prometheus, Grafana)",
+    "Опыт работы с брокерами сообщений Kafka или RabbitMQ",
+    "Опыт работы с Docker, понимание CI/CD"
+   ]
+  },
+  {
+   "id": "demo-hh-1007",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1007",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-15",
+   "level": "middle",
+   "skills": [
+    "celery",
+    "ci/cd",
+    "django",
+    "django rest framework",
+    "docker",
+    "kafka",
+    "kubernetes",
+    "linux",
+    "postgresql",
+    "python",
+    "rest",
+    "sql"
+   ],
+   "tasks": [
+    "Декомпозиция монолита на микросервисы",
+    "Интеграция с внешними сервисами по REST и gRPC"
+   ],
+   "requirements": [
+    "Понимание принципов работы HTTP",
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL",
+    "Опыт работы с брокерами сообщений Kafka или RabbitMQ"
+   ]
+  },
+  {
+   "id": "demo-hh-1008",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1008",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-10-29",
+   "level": "senior",
+   "skills": [
+    "django",
+    "django rest framework",
+    "docker",
+    "fastapi",
+    "flask",
+    "kafka",
+    "kubernetes",
+    "linux",
+    "postgresql",
+    "python",
+    "redis",
+    "rest",
+    "sql"
+   ],
+   "tasks": [
+    "Код-ревью и поддержка качества кода",
+    "Разработка и поддержка сервисов на Django и DRF",
+    "Декомпозиция монолита на микросервисы",
+    "Написание и сопровождение миграций данных"
+   ],
+   "requirements": [
+    "Опыт коммерческой разработки на Python от 3 лет",
+    "Опыт работы с брокерами сообщений Kafka или RabbitMQ"
+   ]
+  },
+  {
+   "id": "demo-hh-1009",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1009",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-11-09",
+   "level": "senior",
+   "skills": [
+    "ci/cd",
+    "django",
+    "django rest framework",
+    "git",
+    "kafka",
+    "nginx",
+    "postgresql",
+    "python",
+    "rest"
+   ],
+   "tasks": [
+    "Написание и сопровождение миграций данных",
+    "Интеграция с внешними сервисами по REST и gRPC",
+    "Рефакторинг легаси-кода"
+   ],
+   "requirements": [
+    "Знание Django ORM и Django REST Framework",
+    "Понимание принципов работы индексов и транзакций",
+    "Знание принципов REST и проектирования API"
+   ]
+  },
+  {
+   "id": "demo-hh-1010",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1010",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-11-11",
+   "level": "senior",
+   "skills": [
+    "asyncio",
+    "django",
+    "fastapi",
+    "git",
+    "kafka",
+    "linux",
+    "python",
+    "rabbitmq",
+    "sql",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Декомпозиция монолита на микросервисы",
+    "Разработка REST API на FastAPI",
+    "Перевод синхронных обработчиков на asyncio",
+    "Рефакторинг легаси-кода"
+   ],
+   "requirements": [
+    "Знание принципов REST и проектирования API",
+    "Опыт коммерческой разработки на Python от 3 лет",
+    "Понимание микросервисной архитектуры"
+   ]
+  },
+  {
+   "id": "demo-hh-1011",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1011",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-10-24",
+   "level": "middle",
+   "skills": [
+    "asyncio",
+    "celery",
+    "django",
+    "grafana",
+    "kafka",
+    "kubernetes",
+    "nginx",
+    "pytest",
+    "python"
+   ],
+   "tasks": [
+    "Написание unit- и интеграционных тестов",
+    "Рефакторинг легаси-кода",
+    "Декомпозиция монолита на микросервисы"
+   ],
+   "requirements": [
+    "Опыт написания тестов на pytest",
+    "Понимание асинхронного программирования (asyncio)",
+    "Знание Django ORM и Django REST Framework"
+   ]
+  },
+  {
+   "id": "demo-hh-1012",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1012",
+   "title": "Junior Python-разработчик",
+   "published_at": "2026-11-01",
+   "level": "junior",
+   "skills": [
+    "django",
+    "kafka",
+    "nginx",
+    "postgresql",
+    "pytest",
+    "python",
+    "redis",
+    "rest",
+    "sql"
+   ],
+   "tasks": [
+    "Разработка и поддержка сервисов на Django и DRF",
+    "Оптимизация медленных SQL-запросов",
+    "Настройка мониторинга и алертов сервисов",
+    "Кэширование ответов и сессий в Redis"
+   ],
+   "requirements": [
+    "Знание принципов REST и проектирования API",
+    "Опыт написания тестов на pytest",
+    "Опыт работы с Redis"
+   ]
+  },
+  {
+   "id": "demo-hh-1013",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1013",
+   "title": "Junior Python-разработчик",
+   "published_at": "2026-11-09",
+   "level": "junior",
+   "skills": [
+    "asyncio",
+    "docker",
+    "git",
+    "linux",
+    "postgresql",
+    "python",
+    "sql"
+   ],
+   "tasks": [
+    "Контейнеризация сервисов и выкладка через CI/CD",
+    "Оптимизация медленных запросов к PostgreSQL",
+    "Декомпозиция монолита на микросервисы",
+    "Проектирование схемы базы данных PostgreSQL"
+   ],
+   "requirements": [
+    "Опыт написания тестов на pytest",
+    "Понимание принципов работы индексов и транзакций",
+    "Понимание микросервисной архитектуры",
+    "Знание Linux на уровне уверенного пользователя"
+   ]
+  },
+  {
+   "id": "demo-hh-1014",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1014",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-11-10",
+   "level": "senior",
+   "skills": [
+    "django",
+    "django rest framework",
+    "docker",
+    "fastapi",
+    "git",
+    "postgresql",
+    "python",
+    "redis",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Написание и сопровождение миграций данных",
+    "Рефакторинг легаси-кода"
+   ],
+   "requirements": [
+    "Опыт работы с SQLAlchemy и Alembic",
+    "Понимание асинхронного программирования (asyncio)",
+    "Понимание принципов работы индексов и транзакций"
+   ]
+  },
+  {
+   "id": "demo-hh-1015",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1015",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-11",
+   "level": "middle",
+   "skills": [
+    "asyncio",
+    "ci/cd",
+    "docker",
+    "fastapi",
+    "flask",
+    "linux",
+    "postgresql",
+    "python",
+    "rabbitmq",
+    "redis",
+    "rest",
+    "sql"
+   ],
+   "tasks": [
+    "Декомпозиция монолита на микросервисы",
+    "Кэширование ответов и сессий в Redis",
+    "Проектирование API для мобильного и веб-клиентов",
+    "Рефакторинг легаси-кода"
+   ],
+   "requirements": [
+    "Знание Linux на уровне уверенного пользователя",
+    "Опыт работы с Redis",
+    "Понимание асинхронного программирования (asyncio)",
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL"
+   ]
+  },
+  {
+   "id": "demo-hh-1016",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1016",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-10-29",
+   "level": "senior",
+   "skills": [
+    "django",
+    "django rest framework",
+    "docker",
+    "git",
+    "kubernetes",
+    "postgresql",
+    "python",
+    "redis",
+    "sql"
+   ],
+   "tasks": [
+    "Код-ревью и поддержка качества кода",
+    "Кэширование ответов и сессий в Redis",
+    "Декомпозиция монолита на микросервисы"
+   ],
+   "requirements": [
+    "Знание Django ORM и Django REST Framework",
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL",
+    "Опыт работы с Docker, понимание CI/CD"
+   ]
+  },
+  {
+   "id": "demo-hh-1017",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1017",
+   "title": "Backend-разработчик Python",
+   "published_at": "2026-11-05",
+   "level": null,
+   "skills": [
+    "celery",
+    "django",
+    "django rest framework",
+    "docker",
+    "fastapi",
+    "git",
+    "kafka",
+    "kubernetes",
+    "linux",
+    "postgresql",
+    "pytest",
+    "python",
+    "rabbitmq",
+    "redis",
+    "sql"
+   ],
+   "tasks": [
+    "Контейнеризация сервисов и выкладка через CI/CD",
+    "Разработка фоновых задач на Celery",
+    "Разработка и поддержка сервисов на Django и DRF"
+   ],
+   "requirements": [
+    "Понимание микросервисной архитектуры",
+    "Знание принципов REST и проектирования API",
+    "Понимание асинхронного программирования (asyncio)"
+   ]
+  },
+  {
+   "id": "demo-hh-1018",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1018",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-11-15",
+   "level": "senior",
+   "skills": [
+    "fastapi",
+    "git",
+    "kubernetes",
+    "linux",
+    "nginx",
+    "postgresql",
+    "prometheus",
+    "python",
+    "rabbitmq",
+    "sql",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Оптимизация медленных запросов к PostgreSQL",
+    "Код-ревью и поддержка качества кода",
+    "Перевод синхронных обработчиков на asyncio",
+    "Написание и сопровождение миграций данных"
+   ],
+   "requirements": [
+    "Знание принципов REST и проектирования API",
+    "Понимание микросервисной архитектуры",
+    "Знание алгоритмов и структур данных",
+    "Понимание принципов работы индексов и транзакций"
+   ]
+  },
+  {
+   "id": "demo-hh-1019",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1019",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-11-12",
+   "level": "senior",
+   "skills": [
+    "asyncio",
+    "django",
+    "django rest framework",
+    "docker",
+    "graphql",
+    "linux",
+    "postgresql",
+    "pytest",
+    "python",
+    "rest"
+   ],
+   "tasks": [
+    "Перевод синхронных обработчиков на asyncio",
+    "Декомпозиция монолита на микросервисы",
+    "Разработка и поддержка сервисов на Django и DRF"
+   ],
+   "requirements": [
+    "Опыт работы с Docker, понимание CI/CD",
+    "Опыт коммерческой разработки на Python от 3 лет",
+    "Понимание асинхронного программирования (asyncio)"
+   ]
+  },
+  {
+   "id": "demo-hh-1020",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1020",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-11",
+   "level": "middle",
+   "skills": [
+    "ci/cd",
+    "django",
+    "django rest framework",
+    "docker",
+    "fastapi",
+    "git",
+    "nginx",
+    "postgresql",
+    "python",
+    "rest",
+    "sql"
+   ],
+   "tasks": [
+    "Декомпозиция монолита на микросервисы",
+    "Разработка и поддержка сервисов на Django и DRF",
+    "Контейнеризация сервисов и выкладка через CI/CD"
+   ],
+   "requirements": [
+    "Понимание ООП, SOLID и паттернов проектирования",
+    "Понимание принципов работы HTTP",
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL",
+    "Знание алгоритмов и структур данных"
+   ]
+  },
+  {
+   "id": "demo-hh-1021",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1021",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-10-22",
+   "level": "middle",
+   "skills": [
+    "django",
+    "fastapi",
+    "grafana",
+    "kubernetes",
+    "linux",
+    "postgresql",
+    "python",
+    "rabbitmq",
+    "redis",
+    "rest",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Декомпозиция монолита на микросервисы",
+    "Кэширование ответов и сессий в Redis",
+    "Оптимизация медленных запросов к PostgreSQL"
+   ],
+   "requirements": [
+    "Опыт настройки мониторинга (Prometheus, Grafana)",
+    "Опыт работы с Redis",
+    "Опыт работы с SQLAlchemy и Alembic"
+   ]
+  },
+  {
+   "id": "demo-hh-1022",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1022",
+   "title": "Junior Python-разработчик",
+   "published_at": "2026-11-07",
+   "level": "junior",
+   "skills": [
+    "fastapi",
+    "git",
+    "linux",
+    "postgresql",
+    "prometheus",
+    "python",
+    "redis",
+    "rest",
+    "sql"
+   ],
+   "tasks": [
+    "Интеграция с внешними сервисами по REST и gRPC",
+    "Настройка мониторинга и алертов сервисов",
+    "Обмен сообщениями между сервисами через RabbitMQ",
+    "Оптимизация медленных SQL-запросов"
+   ],
+   "requirements": [
+    "Понимание ООП, SOLID и паттернов проектирования",
+    "Опыт настройки мониторинга (Prometheus, Grafana)"
+   ]
+  },
+  {
+   "id": "demo-hh-1023",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1023",
+   "title": "Backend-разработчик Python",
+   "published_at": "2026-11-13",
+   "level": null,
+   "skills": [
+    "asyncio",
+    "ci/cd",
+    "docker",
+    "fastapi",
+    "linux",
+    "postgresql",
+    "prometheus",
+    "pytest",
+    "python",
+    "sql"
+   ],
+   "tasks": [
+    "Написание и сопровождение миграций данных",
+    "Оптимизация медленных запросов к PostgreSQL",
+    "Профилирование и ускорение медленных участков сервиса"
+   ],
+   "requirements": [
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL",
+    "Опыт написания тестов на pytest",
+    "Знание алгоритмов и структур данных"
+   ]
+  },
+  {
+   "id": "demo-hh-1024",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1024",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-11-13",
+   "level": "senior",
+   "skills": [
+    "django",
+    "django rest framework",
+    "docker",
+    "fastapi",
+    "postgresql",
+    "pytest",
+    "python"
+   ],
+   "tasks": [
+    "Проектирование схемы базы данных PostgreSQL",
+    "Оптимизация медленных запросов к PostgreSQL",
+    "Разработка REST API на FastAPI"
+   ],
+   "requirements": [
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL",
+    "Знание Django ORM и Django REST Framework",
+    "Знание Linux на уровне уверенного пользователя"
+   ]
+  },
+  {
+   "id": "demo-hh-1025",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1025",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-15",
+   "level": "middle",
+   "skills": [
+    "flask",
+    "graphql",
+    "nginx",
+    "postgresql",
+    "pytest",
+    "python",
+    "sql"
+   ],
+   "tasks": [
+    "Покрытие кода автотестами на pytest",
+    "Написание и сопровождение миграций данных"
+   ],
+   "requirements": [
+    "Понимание принципов работы индексов и транзакций",
+    "Опыт работы с Redis"
+   ]
+  },
+  {
+   "id": "demo-hh-1026",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1026",
+   "title": "Junior Python-разработчик",
+   "published_at": "2026-10-23",
+   "level": "junior",
+   "skills": [
+    "celery",
+    "docker",
+    "git",
+    "postgresql",
+    "python",
+    "sql",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Декомпозиция монолита на микросервисы",
+    "Проектирование схемы базы данных PostgreSQL",
+    "Профилирование и ускорение медленных участков сервиса",
+    "Контейнеризация сервисов и выкладка через CI/CD"
+   ],
+   "requirements": [
+    "Понимание принципов работы индексов и транзакций",
+    "Опыт работы с SQLAlchemy и Alembic",
+    "Понимание асинхронного программирования (asyncio)"
+   ]
+  },
+  {
+   "id": "demo-hh-1027",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1027",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-10-26",
+   "level": "senior",
+   "skills": [
+    "asyncio",
+    "docker",
+    "fastapi",
+    "git",
+    "kafka",
+    "kubernetes",
+    "linux",
+    "pytest",
+    "python",
+    "rabbitmq",
+    "rest"
+   ],
+   "tasks": [
+    "Оптимизация медленных запросов к PostgreSQL",
+    "Разбор инцидентов в продакшене и устранение причин",
+    "Интеграции с внешними API партнёров"
+   ],
+   "requirements": [
+    "Понимание асинхронного программирования (asyncio)",
+    "Опыт работы с брокерами сообщений Kafka или RabbitMQ",
+    "Опыт работы с Docker, понимание CI/CD",
+    "Знание принципов REST и проектирования API"
+   ]
+  },
+  {
+   "id": "demo-hh-1028",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1028",
+   "title": "Junior Python-разработчик",
+   "published_at": "2026-10-29",
+   "level": "junior",
+   "skills": [
+    "asyncio",
+    "ci/cd",
+    "docker",
+    "fastapi",
+    "flask",
+    "git",
+    "graphql",
+    "pytest",
+    "python",
+    "rest"
+   ],
+   "tasks": [
+    "Декомпозиция монолита на микросервисы",
+    "Перевод синхронных обработчиков на asyncio",
+    "Настройка мониторинга и алертов сервисов",
+    "Профилирование и ускорение медленных участков сервиса"
+   ],
+   "requirements": [
+    "Понимание принципов работы HTTP",
+    "Знание принципов REST и проектирования API"
+   ]
+  },
+  {
+   "id": "demo-hh-1029",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1029",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-05",
+   "level": "middle",
+   "skills": [
+    "git",
+    "linux",
+    "postgresql",
+    "pytest",
+    "python",
+    "rest"
+   ],
+   "tasks": [
+    "Проектирование схемы базы данных PostgreSQL",
+    "Покрытие кода автотестами на pytest"
+   ],
+   "requirements": [
+    "Знание Linux на уровне уверенного пользователя",
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL",
+    "Знание принципов REST и проектирования API"
+   ]
+  },
+  {
+   "id": "demo-hh-1030",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1030",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-10-22",
+   "level": "senior",
+   "skills": [
+    "asyncio",
+    "docker",
+    "git",
+    "linux",
+    "postgresql",
+    "python",
+    "redis"
+   ],
+   "tasks": [
+    "Проектирование схемы базы данных PostgreSQL",
+    "Перевод синхронных обработчиков на asyncio"
+   ],
+   "requirements": [
+    "Понимание асинхронного программирования (asyncio)",
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL",
+    "Опыт работы с Docker, понимание CI/CD",
+    "Понимание ООП, SOLID и паттернов проектирования"
+   ]
+  },
+  {
+   "id": "demo-hh-1031",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1031",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-11-12",
+   "level": "senior",
+   "skills": [
+    "docker",
+    "git",
+    "postgresql",
+    "pytest",
+    "python"
+   ],
+   "tasks": [
+    "Написание unit- и интеграционных тестов",
+    "Проектирование схемы базы данных PostgreSQL",
+    "Контейнеризация сервисов и выкладка через CI/CD",
+    "Декомпозиция монолита на микросервисы"
+   ],
+   "requirements": [
+    "Понимание принципов работы индексов и транзакций",
+    "Знание Linux на уровне уверенного пользователя",
+    "Опыт работы с Docker, понимание CI/CD"
+   ]
+  },
+  {
+   "id": "demo-hh-1032",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1032",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-10-20",
+   "level": "senior",
+   "skills": [
+    "celery",
+    "docker",
+    "git",
+    "linux",
+    "pytest",
+    "python",
+    "sql",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Разработка фоновых задач на Celery",
+    "Код-ревью и поддержка качества кода",
+    "Оптимизация медленных запросов к PostgreSQL"
+   ],
+   "requirements": [
+    "Опыт работы с SQLAlchemy и Alembic",
+    "Опыт написания тестов на pytest",
+    "Опыт работы с Docker, понимание CI/CD"
+   ]
+  },
+  {
+   "id": "demo-hh-1033",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1033",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-10-27",
+   "level": "middle",
+   "skills": [
+    "asyncio",
+    "django",
+    "django rest framework",
+    "docker",
+    "git",
+    "linux",
+    "postgresql",
+    "python",
+    "rest"
+   ],
+   "tasks": [
+    "Интеграция сервисов через Kafka",
+    "Перевод синхронных обработчиков на asyncio",
+    "Интеграция с внешними сервисами по REST и gRPC",
+    "Проектирование API для мобильного и веб-клиентов"
+   ],
+   "requirements": [
+    "Знание принципов REST и проектирования API",
+    "Понимание принципов работы HTTP",
+    "Знание алгоритмов и структур данных",
+    "Понимание принципов работы индексов и транзакций"
+   ]
+  },
+  {
+   "id": "demo-hh-1034",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1034",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-11-06",
+   "level": "senior",
+   "skills": [
+    "ci/cd",
+    "django",
+    "docker",
+    "git",
+    "grafana",
+    "postgresql",
+    "pytest",
+    "python",
+    "rest"
+   ],
+   "tasks": [
+    "Контейнеризация сервисов и выкладка через CI/CD",
+    "Оптимизация медленных запросов к PostgreSQL"
+   ],
+   "requirements": [
+    "Опыт работы с Docker, понимание CI/CD",
+    "Знание Django ORM и Django REST Framework"
+   ]
+  },
+  {
+   "id": "demo-hh-1035",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1035",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-02",
+   "level": "middle",
+   "skills": [
+    "celery",
+    "docker",
+    "fastapi",
+    "git",
+    "kubernetes",
+    "linux",
+    "postgresql",
+    "python",
+    "redis"
+   ],
+   "tasks": [
+    "Декомпозиция монолита на микросервисы",
+    "Оптимизация медленных запросов к PostgreSQL",
+    "Профилирование и ускорение медленных участков сервиса",
+    "Написание и сопровождение миграций данных"
+   ],
+   "requirements": [
+    "Понимание микросервисной архитектуры",
+    "Знание принципов REST и проектирования API",
+    "Понимание принципов работы индексов и транзакций"
+   ]
+  },
+  {
+   "id": "demo-hh-1036",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1036",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-07",
+   "level": "middle",
+   "skills": [
+    "celery",
+    "django",
+    "django rest framework",
+    "docker",
+    "fastapi",
+    "git",
+    "kafka",
+    "postgresql",
+    "python",
+    "rabbitmq",
+    "redis",
+    "rest"
+   ],
+   "tasks": [
+    "Проектирование API для мобильного и веб-клиентов",
+    "Разработка REST API на FastAPI"
+   ],
+   "requirements": [
+    "Знание Django ORM и Django REST Framework",
+    "Понимание асинхронного программирования (asyncio)"
+   ]
+  },
+  {
+   "id": "demo-hh-1037",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1037",
+   "title": "Junior Python-разработчик",
+   "published_at": "2026-10-25",
+   "level": "junior",
+   "skills": [
+    "celery",
+    "ci/cd",
+    "django",
+    "django rest framework",
+    "docker",
+    "fastapi",
+    "git",
+    "grafana",
+    "postgresql",
+    "python",
+    "sql",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Написание и сопровождение миграций данных",
+    "Оптимизация медленных SQL-запросов",
+    "Рефакторинг легаси-кода",
+    "Проектирование схемы базы данных PostgreSQL"
+   ],
+   "requirements": [
+    "Опыт работы с Docker, понимание CI/CD",
+    "Понимание принципов работы индексов и транзакций"
+   ]
+  },
+  {
+   "id": "demo-hh-1038",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1038",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-10-26",
+   "level": "senior",
+   "skills": [
+    "asyncio",
+    "docker",
+    "git",
+    "postgresql",
+    "python",
+    "rest",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Оптимизация медленных запросов к PostgreSQL",
+    "Перевод синхронных обработчиков на asyncio"
+   ],
+   "requirements": [
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL",
+    "Опыт работы с SQLAlchemy и Alembic",
+    "Знание принципов REST и проектирования API"
+   ]
+  },
+  {
+   "id": "demo-hh-1039",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1039",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-09",
+   "level": "middle",
+   "skills": [
+    "django",
+    "django rest framework",
+    "fastapi",
+    "git",
+    "postgresql",
+    "python",
+    "rest"
+   ],
+   "tasks": [
+    "Интеграции с внешними API партнёров",
+    "Написание и сопровождение миграций данных",
+    "Разработка и поддержка REST API на FastAPI"
+   ],
+   "requirements": [
+    "Знание принципов REST и проектирования API",
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL",
+    "Знание алгоритмов и структур данных",
+    "Понимание принципов работы индексов и транзакций"
+   ]
+  },
+  {
+   "id": "demo-hh-1040",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1040",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-01",
+   "level": "middle",
+   "skills": [
+    "asyncio",
+    "ci/cd",
+    "django",
+    "django rest framework",
+    "docker",
+    "fastapi",
+    "postgresql",
+    "python",
+    "redis",
+    "rest",
+    "sql"
+   ],
+   "tasks": [
+    "Кэширование ответов и сессий в Redis",
+    "Проектирование схемы базы данных PostgreSQL",
+    "Перевод синхронных обработчиков на asyncio",
+    "Написание и сопровождение миграций данных"
+   ],
+   "requirements": [
+    "Знание принципов REST и проектирования API",
+    "Понимание принципов работы HTTP",
+    "Понимание асинхронного программирования (asyncio)"
+   ]
+  },
+  {
+   "id": "demo-hh-1041",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1041",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-01",
+   "level": "middle",
+   "skills": [
+    "ci/cd",
+    "docker",
+    "git",
+    "grafana",
+    "linux",
+    "nginx",
+    "postgresql",
+    "pytest",
+    "python",
+    "rabbitmq",
+    "redis",
+    "rest"
+   ],
+   "tasks": [
+    "Разбор инцидентов в продакшене и устранение причин",
+    "Декомпозиция монолита на микросервисы",
+    "Проектирование API для мобильного и веб-клиентов"
+   ],
+   "requirements": [
+    "Опыт работы с Redis",
+    "Понимание принципов работы HTTP"
+   ]
+  },
+  {
+   "id": "demo-hh-1042",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1042",
+   "title": "Backend-разработчик Python",
+   "published_at": "2026-11-14",
+   "level": null,
+   "skills": [
+    "docker",
+    "fastapi",
+    "linux",
+    "nginx",
+    "postgresql",
+    "python",
+    "rabbitmq",
+    "rest"
+   ],
+   "tasks": [
+    "Оптимизация медленных SQL-запросов",
+    "Проектирование схемы базы данных PostgreSQL",
+    "Проектирование API для мобильного и веб-клиентов"
+   ],
+   "requirements": [
+    "Понимание асинхронного программирования (asyncio)",
+    "Понимание ООП, SOLID и паттернов проектирования"
+   ]
+  },
+  {
+   "id": "demo-hh-1043",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1043",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-04",
+   "level": "middle",
+   "skills": [
+    "celery",
+    "docker",
+    "fastapi",
+    "git",
+    "nginx",
+    "postgresql",
+    "pytest",
+    "python",
+    "redis",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Разработка фоновых задач на Celery",
+    "Профилирование и ускорение медленных участков сервиса",
+    "Декомпозиция монолита на микросервисы",
+    "Проектирование схемы базы данных PostgreSQL"
+   ],
+   "requirements": [
+    "Знание принципов REST и проектирования API",
+    "Опыт работы с Redis"
+   ]
+  },
+  {
+   "id": "demo-hh-1044",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1044",
+   "title": "Junior Python-разработчик",
+   "published_at": "2026-11-02",
+   "level": "junior",
+   "skills": [
+    "ci/cd",
+    "django",
+    "fastapi",
+    "linux",
+    "python",
+    "redis",
+    "rest",
+    "sql",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Написание и сопровождение миграций данных",
+    "Контейнеризация сервисов и выкладка через CI/CD",
+    "Профилирование и ускорение медленных участков сервиса",
+    "Разработка и поддержка REST API на FastAPI"
+   ],
+   "requirements": [
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL",
+    "Знание Linux на уровне уверенного пользователя"
+   ]
+  },
+  {
+   "id": "demo-hh-1045",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1045",
+   "title": "Junior Python-разработчик",
+   "published_at": "2026-10-20",
+   "level": "junior",
+   "skills": [
+    "ci/cd",
+    "git",
+    "kubernetes",
+    "postgresql",
+    "prometheus",
+    "python",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Оптимизация медленных SQL-запросов",
+    "Настройка мониторинга и алертов сервисов",
+    "Контейнеризация сервисов и выкладка через CI/CD",
+    "Проектирование схемы базы данных PostgreSQL"
+   ],
+   "requirements": [
+    "Понимание микросервисной архитектуры",
+    "Опыт настройки мониторинга (Prometheus, Grafana)",
+    "Понимание принципов работы индексов и транзакций",
+    "Опыт работы с SQLAlchemy и Alembic"
+   ]
+  },
+  {
+   "id": "demo-hh-1046",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1046",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-10-20",
+   "level": "middle",
+   "skills": [
+    "ci/cd",
+    "docker",
+    "git",
+    "nginx",
+    "postgresql",
+    "pytest",
+    "python",
+    "rest",
+    "sql",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Код-ревью и поддержка качества кода",
+    "Проектирование схемы базы данных PostgreSQL",
+    "Рефакторинг легаси-кода",
+    "Проектирование API для мобильного и веб-клиентов"
+   ],
+   "requirements": [
+    "Понимание принципов работы HTTP",
+    "Понимание принципов работы индексов и транзакций"
+   ]
+  },
+  {
+   "id": "demo-hh-1047",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1047",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-10-31",
+   "level": "middle",
+   "skills": [
+    "ci/cd",
+    "docker",
+    "fastapi",
+    "kafka",
+    "kubernetes",
+    "linux",
+    "postgresql",
+    "python",
+    "rabbitmq",
+    "rest",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Интеграция сервисов через Kafka",
+    "Проектирование схемы базы данных PostgreSQL"
+   ],
+   "requirements": [
+    "Понимание принципов работы индексов и транзакций",
+    "Понимание микросервисной архитектуры",
+    "Опыт работы с брокерами сообщений Kafka или RabbitMQ",
+    "Опыт работы с Docker, понимание CI/CD"
+   ]
+  },
+  {
+   "id": "demo-hh-1048",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1048",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-10-23",
+   "level": "middle",
+   "skills": [
+    "ci/cd",
+    "django",
+    "docker",
+    "fastapi",
+    "git",
+    "kafka",
+    "linux",
+    "postgresql",
+    "pytest",
+    "python",
+    "redis",
+    "rest"
+   ],
+   "tasks": [
+    "Интеграция сервисов через Kafka",
+    "Интеграция с внешними сервисами по REST и gRPC"
+   ],
+   "requirements": [
+    "Опыт написания тестов на pytest",
+    "Знание Django ORM и Django REST Framework",
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL"
+   ]
+  },
+  {
+   "id": "demo-hh-1049",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1049",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-05",
+   "level": "middle",
+   "skills": [
+    "ci/cd",
+    "docker",
+    "fastapi",
+    "git",
+    "graphql",
+    "linux",
+    "nginx",
+    "postgresql",
+    "pytest",
+    "python",
+    "redis",
+    "sql",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Написание unit- и интеграционных тестов",
+    "Рефакторинг легаси-кода",
+    "Разработка фоновых задач на Celery",
+    "Разбор инцидентов в продакшене и устранение причин"
+   ],
+   "requirements": [
+    "Опыт работы с Docker, понимание CI/CD",
+    "Опыт работы с Redis",
+    "Понимание принципов работы индексов и транзакций",
+    "Понимание асинхронного программирования (asyncio)"
+   ]
+  },
+  {
+   "id": "demo-hh-1050",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1050",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-10-22",
+   "level": "middle",
+   "skills": [
+    "ci/cd",
+    "docker",
+    "fastapi",
+    "linux",
+    "postgresql",
+    "python",
+    "rest"
+   ],
+   "tasks": [
+    "Разработка фоновых задач на Celery",
+    "Проектирование схемы базы данных PostgreSQL"
+   ],
+   "requirements": [
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL",
+    "Опыт коммерческой разработки на Python от 3 лет"
+   ]
+  },
+  {
+   "id": "demo-hh-1051",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1051",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-10-25",
+   "level": "middle",
+   "skills": [
+    "asyncio",
+    "docker",
+    "fastapi",
+    "git",
+    "kafka",
+    "kubernetes",
+    "postgresql",
+    "python",
+    "rabbitmq",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Перевод синхронных обработчиков на asyncio",
+    "Написание и сопровождение миграций данных",
+    "Оптимизация медленных SQL-запросов",
+    "Интеграция сервисов через Kafka"
+   ],
+   "requirements": [
+    "Понимание ООП, SOLID и паттернов проектирования",
+    "Понимание микросервисной архитектуры",
+    "Знание принципов REST и проектирования API",
+    "Опыт работы с SQLAlchemy и Alembic"
+   ]
+  },
+  {
+   "id": "demo-hh-1052",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1052",
+   "title": "Backend-разработчик Python",
+   "published_at": "2026-11-01",
+   "level": null,
+   "skills": [
+    "asyncio",
+    "docker",
+    "fastapi",
+    "git",
+    "linux",
+    "pytest",
+    "python",
+    "redis"
+   ],
+   "tasks": [
+    "Код-ревью и поддержка качества кода",
+    "Оптимизация медленных SQL-запросов",
+    "Покрытие кода автотестами на pytest"
+   ],
+   "requirements": [
+    "Знание Linux на уровне уверенного пользователя",
+    "Опыт работы с Docker, понимание CI/CD",
+    "Понимание асинхронного программирования (asyncio)",
+    "Опыт написания тестов на pytest"
+   ]
+  },
+  {
+   "id": "demo-hh-1053",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1053",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-09",
+   "level": "middle",
+   "skills": [
+    "ci/cd",
+    "django",
+    "docker",
+    "fastapi",
+    "flask",
+    "nginx",
+    "postgresql",
+    "python",
+    "rest",
+    "sql",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Проектирование API для мобильного и веб-клиентов",
+    "Проектирование схемы базы данных PostgreSQL",
+    "Разработка и поддержка сервисов на Django и DRF"
+   ],
+   "requirements": [
+    "Понимание асинхронного программирования (asyncio)",
+    "Опыт работы с SQLAlchemy и Alembic"
+   ]
+  },
+  {
+   "id": "demo-hh-1054",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1054",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-10-25",
+   "level": "senior",
+   "skills": [
+    "django",
+    "docker",
+    "git",
+    "kafka",
+    "linux",
+    "postgresql",
+    "python",
+    "sql"
+   ],
+   "tasks": [
+    "Декомпозиция монолита на микросервисы",
+    "Разбор инцидентов в продакшене и устранение причин",
+    "Оптимизация медленных SQL-запросов"
+   ],
+   "requirements": [
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL",
+    "Понимание микросервисной архитектуры",
+    "Опыт работы с брокерами сообщений Kafka или RabbitMQ"
+   ]
+  },
+  {
+   "id": "demo-hh-1055",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1055",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-13",
+   "level": "middle",
+   "skills": [
+    "docker",
+    "postgresql",
+    "pytest",
+    "python",
+    "redis",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Кэширование ответов и сессий в Redis",
+    "Написание unit- и интеграционных тестов",
+    "Проектирование схемы базы данных PostgreSQL",
+    "Оптимизация медленных SQL-запросов"
+   ],
+   "requirements": [
+    "Опыт работы с Docker, понимание CI/CD",
+    "Опыт коммерческой разработки на Python от 3 лет",
+    "Опыт работы с SQLAlchemy и Alembic"
+   ]
+  },
+  {
+   "id": "demo-hh-1056",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1056",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-14",
+   "level": "middle",
+   "skills": [
+    "asyncio",
+    "ci/cd",
+    "fastapi",
+    "git",
+    "grafana",
+    "kafka",
+    "postgresql",
+    "prometheus",
+    "python",
+    "redis",
+    "rest",
+    "sql"
+   ],
+   "tasks": [
+    "Настройка мониторинга и алертов сервисов",
+    "Разработка консьюмеров и продюсеров Kafka"
+   ],
+   "requirements": [
+    "Знание принципов REST и проектирования API",
+    "Понимание принципов работы индексов и транзакций",
+    "Опыт работы с Redis",
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL"
+   ]
+  },
+  {
+   "id": "demo-hh-1057",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1057",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-10-21",
+   "level": "senior",
+   "skills": [
+    "asyncio",
+    "docker",
+    "fastapi",
+    "git",
+    "kafka",
+    "linux",
+    "postgresql",
+    "python",
+    "rabbitmq",
+    "rest",
+    "sql"
+   ],
+   "tasks": [
+    "Проектирование схемы базы данных PostgreSQL",
+    "Интеграция сервисов через Kafka",
+    "Разработка REST API на FastAPI"
+   ],
+   "requirements": [
+    "Понимание принципов работы HTTP",
+    "Знание принципов REST и проектирования API"
+   ]
+  },
+  {
+   "id": "demo-hh-1058",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1058",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-05",
+   "level": "middle",
+   "skills": [
+    "celery",
+    "ci/cd",
+    "docker",
+    "fastapi",
+    "git",
+    "postgresql",
+    "python",
+    "rabbitmq",
+    "rest"
+   ],
+   "tasks": [
+    "Написание и сопровождение миграций данных",
+    "Контейнеризация сервисов и выкладка через CI/CD"
+   ],
+   "requirements": [
+    "Опыт работы с Docker, понимание CI/CD",
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL",
+    "Понимание ООП, SOLID и паттернов проектирования"
+   ]
+  },
+  {
+   "id": "demo-hh-1059",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1059",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-10-20",
+   "level": "senior",
+   "skills": [
+    "django",
+    "kafka",
+    "kubernetes",
+    "postgresql",
+    "python",
+    "rabbitmq",
+    "rest"
+   ],
+   "tasks": [
+    "Оптимизация медленных SQL-запросов",
+    "Проектирование API для мобильного и веб-клиентов",
+    "Интеграция с внешними сервисами по REST и gRPC"
+   ],
+   "requirements": [
+    "Понимание микросервисной архитектуры",
+    "Опыт работы с брокерами сообщений Kafka или RabbitMQ",
+    "Понимание ООП, SOLID и паттернов проектирования",
+    "Понимание принципов работы HTTP"
+   ]
+  },
+  {
+   "id": "demo-hh-1060",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1060",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-15",
+   "level": "middle",
+   "skills": [
+    "django",
+    "django rest framework",
+    "docker",
+    "fastapi",
+    "flask",
+    "kafka",
+    "kubernetes",
+    "linux",
+    "postgresql",
+    "pytest",
+    "python",
+    "redis",
+    "rest",
+    "sql"
+   ],
+   "tasks": [
+    "Рефакторинг легаси-кода",
+    "Интеграции с внешними API партнёров",
+    "Разработка консьюмеров и продюсеров Kafka"
+   ],
+   "requirements": [
+    "Знание алгоритмов и структур данных",
+    "Понимание принципов работы HTTP",
+    "Понимание микросервисной архитектуры"
+   ]
+  },
+  {
+   "id": "demo-hh-1061",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1061",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-10-26",
+   "level": "middle",
+   "skills": [
+    "ci/cd",
+    "django",
+    "docker",
+    "git",
+    "python",
+    "sql"
+   ],
+   "tasks": [
+    "Написание и сопровождение миграций данных",
+    "Разработка и поддержка сервисов на Django и DRF",
+    "Разбор инцидентов в продакшене и устранение причин"
+   ],
+   "requirements": [
+    "Опыт работы с Docker, понимание CI/CD",
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL"
+   ]
+  },
+  {
+   "id": "demo-hh-1062",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1062",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-14",
+   "level": "middle",
+   "skills": [
+    "ci/cd",
+    "fastapi",
+    "kafka",
+    "linux",
+    "postgresql",
+    "python",
+    "rabbitmq",
+    "rest",
+    "sql"
+   ],
+   "tasks": [
+    "Написание и сопровождение миграций данных",
+    "Проектирование схемы базы данных PostgreSQL",
+    "Обмен сообщениями между сервисами через RabbitMQ",
+    "Проектирование API для мобильного и веб-клиентов"
+   ],
+   "requirements": [
+    "Понимание асинхронного программирования (asyncio)",
+    "Опыт работы с Docker, понимание CI/CD",
+    "Понимание микросервисной архитектуры"
+   ]
+  },
+  {
+   "id": "demo-hh-1063",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1063",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-02",
+   "level": "middle",
+   "skills": [
+    "asyncio",
+    "docker",
+    "fastapi",
+    "git",
+    "kubernetes",
+    "linux",
+    "postgresql",
+    "python",
+    "sql"
+   ],
+   "tasks": [
+    "Разработка и поддержка REST API на FastAPI",
+    "Перевод синхронных обработчиков на asyncio",
+    "Контейнеризация сервисов и выкладка через CI/CD",
+    "Проектирование схемы базы данных PostgreSQL"
+   ],
+   "requirements": [
+    "Знание Linux на уровне уверенного пользователя",
+    "Знание алгоритмов и структур данных",
+    "Понимание принципов работы индексов и транзакций"
+   ]
+  },
+  {
+   "id": "demo-hh-1064",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1064",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-10-20",
+   "level": "middle",
+   "skills": [
+    "docker",
+    "grafana",
+    "kafka",
+    "nginx",
+    "postgresql",
+    "python",
+    "redis"
+   ],
+   "tasks": [
+    "Настройка мониторинга и алертов сервисов",
+    "Разработка консьюмеров и продюсеров Kafka",
+    "Декомпозиция монолита на микросервисы"
+   ],
+   "requirements": [
+    "Понимание микросервисной архитектуры",
+    "Опыт работы с Redis",
+    "Опыт коммерческой разработки на Python от 3 лет",
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL"
+   ]
+  },
+  {
+   "id": "demo-hh-1065",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1065",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-03",
+   "level": "middle",
+   "skills": [
+    "asyncio",
+    "fastapi",
+    "git",
+    "grafana",
+    "postgresql",
+    "python",
+    "rest",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Проектирование схемы базы данных PostgreSQL",
+    "Настройка мониторинга и алертов сервисов"
+   ],
+   "requirements": [
+    "Понимание ООП, SOLID и паттернов проектирования",
+    "Опыт настройки мониторинга (Prometheus, Grafana)",
+    "Знание алгоритмов и структур данных",
+    "Понимание принципов работы HTTP"
+   ]
+  },
+  {
+   "id": "demo-hh-1066",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1066",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-01",
+   "level": "middle",
+   "skills": [
+    "asyncio",
+    "docker",
+    "fastapi",
+    "git",
+    "kafka",
+    "linux",
+    "postgresql",
+    "python",
+    "redis",
+    "rest",
+    "sql"
+   ],
+   "tasks": [
+    "Интеграция сервисов через Kafka",
+    "Профилирование и ускорение медленных участков сервиса"
+   ],
+   "requirements": [
+    "Опыт работы с Docker, понимание CI/CD",
+    "Понимание принципов работы индексов и транзакций",
+    "Знание Linux на уровне уверенного пользователя"
+   ]
+  },
+  {
+   "id": "demo-hh-1067",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1067",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-11-13",
+   "level": "senior",
+   "skills": [
+    "asyncio",
+    "django",
+    "docker",
+    "git",
+    "kafka",
+    "nginx",
+    "python",
+    "redis"
+   ],
+   "tasks": [
+    "Разработка консьюмеров и продюсеров Kafka",
+    "Контейнеризация сервисов и выкладка через CI/CD",
+    "Разработка и поддержка сервисов на Django и DRF",
+    "Разработка REST API на FastAPI"
+   ],
+   "requirements": [
+    "Знание Django ORM и Django REST Framework",
+    "Понимание микросервисной архитектуры"
+   ]
+  },
+  {
+   "id": "demo-hh-1068",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1068",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-14",
+   "level": "middle",
+   "skills": [
+    "asyncio",
+    "django",
+    "docker",
+    "git",
+    "linux",
+    "postgresql",
+    "python",
+    "sql"
+   ],
+   "tasks": [
+    "Профилирование и ускорение медленных участков сервиса",
+    "Проектирование схемы базы данных PostgreSQL",
+    "Декомпозиция монолита на микросервисы"
+   ],
+   "requirements": [
+    "Понимание принципов работы индексов и транзакций",
+    "Опыт коммерческой разработки на Python от 3 лет"
+   ]
+  },
+  {
+   "id": "demo-hh-1069",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1069",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-10",
+   "level": "middle",
+   "skills": [
+    "asyncio",
+    "celery",
+    "django",
+    "git",
+    "kafka",
+    "postgresql",
+    "python",
+    "redis",
+    "rest",
+    "sql"
+   ],
+   "tasks": [
+    "Оптимизация медленных SQL-запросов",
+    "Рефакторинг легаси-кода",
+    "Разработка и поддержка сервисов на Django и DRF",
+    "Перевод синхронных обработчиков на asyncio"
+   ],
+   "requirements": [
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL",
+    "Опыт работы с брокерами сообщений Kafka или RabbitMQ",
+    "Понимание принципов работы HTTP",
+    "Понимание асинхронного программирования (asyncio)"
+   ]
+  },
+  {
+   "id": "demo-hh-1070",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1070",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-11-02",
+   "level": "middle",
+   "skills": [
+    "ci/cd",
+    "django",
+    "docker",
+    "fastapi",
+    "git",
+    "kubernetes",
+    "python",
+    "rabbitmq",
+    "redis"
+   ],
+   "tasks": [
+    "Кэширование ответов и сессий в Redis",
+    "Обмен сообщениями между сервисами через RabbitMQ",
+    "Разработка и поддержка сервисов на Django и DRF",
+    "Декомпозиция монолита на микросервисы"
+   ],
+   "requirements": [
+    "Опыт работы с брокерами сообщений Kafka или RabbitMQ",
+    "Знание Django ORM и Django REST Framework",
+    "Понимание ООП, SOLID и паттернов проектирования"
+   ]
+  },
+  {
+   "id": "demo-hh-1071",
+   "source": "hh",
+   "url": "https://example.org/demo/hh/vacancy/1071",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-10-21",
+   "level": "senior",
+   "skills": [
+    "asyncio",
+    "docker",
+    "fastapi",
+    "git",
+    "linux",
+    "postgresql",
+    "python",
+    "rabbitmq",
+    "redis",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Проектирование схемы базы данных PostgreSQL",
+    "Обмен сообщениями между сервисами через RabbitMQ"
+   ],
+   "requirements": [
+    "Знание принципов REST и проектирования API",
+    "Опыт работы с Docker, понимание CI/CD",
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL"
+   ]
+  },
+  {
+   "id": "demo-trudvsem-5000",
+   "source": "trudvsem",
+   "url": "https://example.org/demo/trudvsem/vacancy/5000",
+   "title": "Junior Python-разработчик",
+   "published_at": "2026-09-07",
+   "level": "junior",
+   "skills": [
+    "django",
+    "django rest framework",
+    "docker",
+    "kafka",
+    "linux",
+    "postgresql",
+    "python",
+    "redis",
+    "rest",
+    "sql"
+   ],
+   "tasks": [
+    "Разработка и поддержка сервисов на Django и DRF",
+    "Разработка консьюмеров и продюсеров Kafka",
+    "Интеграция с внешними сервисами по REST и gRPC",
+    "Рефакторинг легаси-кода"
+   ],
+   "requirements": [
+    "Знание Django ORM и Django REST Framework",
+    "Понимание принципов работы индексов и транзакций"
+   ]
+  },
+  {
+   "id": "demo-trudvsem-5001",
+   "source": "trudvsem",
+   "url": "https://example.org/demo/trudvsem/vacancy/5001",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-09-03",
+   "level": "senior",
+   "skills": [
+    "asyncio",
+    "docker",
+    "kubernetes",
+    "postgresql",
+    "pytest",
+    "python",
+    "rabbitmq",
+    "redis",
+    "rest",
+    "sql"
+   ],
+   "tasks": [
+    "Оптимизация медленных SQL-запросов",
+    "Покрытие кода автотестами на pytest",
+    "Перевод синхронных обработчиков на asyncio"
+   ],
+   "requirements": [
+    "Понимание принципов работы HTTP",
+    "Понимание асинхронного программирования (asyncio)"
+   ]
+  },
+  {
+   "id": "demo-trudvsem-5002",
+   "source": "trudvsem",
+   "url": "https://example.org/demo/trudvsem/vacancy/5002",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-11-04",
+   "level": "senior",
+   "skills": [
+    "ci/cd",
+    "docker",
+    "fastapi",
+    "git",
+    "kafka",
+    "kubernetes",
+    "linux",
+    "postgresql",
+    "python",
+    "sql"
+   ],
+   "tasks": [
+    "Разработка REST API на FastAPI",
+    "Разбор инцидентов в продакшене и устранение причин",
+    "Контейнеризация сервисов и выкладка через CI/CD",
+    "Разработка фоновых задач на Celery"
+   ],
+   "requirements": [
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL",
+    "Понимание принципов работы индексов и транзакций"
+   ]
+  },
+  {
+   "id": "demo-trudvsem-5003",
+   "source": "trudvsem",
+   "url": "https://example.org/demo/trudvsem/vacancy/5003",
+   "title": "Junior Python-разработчик",
+   "published_at": "2026-09-27",
+   "level": "junior",
+   "skills": [
+    "asyncio",
+    "celery",
+    "docker",
+    "fastapi",
+    "linux",
+    "nginx",
+    "postgresql",
+    "python",
+    "redis"
+   ],
+   "tasks": [
+    "Кэширование ответов и сессий в Redis",
+    "Разработка и поддержка REST API на FastAPI"
+   ],
+   "requirements": [
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL",
+    "Знание Linux на уровне уверенного пользователя"
+   ]
+  },
+  {
+   "id": "demo-trudvsem-5004",
+   "source": "trudvsem",
+   "url": "https://example.org/demo/trudvsem/vacancy/5004",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-10-27",
+   "level": "middle",
+   "skills": [
+    "asyncio",
+    "fastapi",
+    "kafka",
+    "kubernetes",
+    "linux",
+    "postgresql",
+    "prometheus",
+    "python",
+    "redis"
+   ],
+   "tasks": [
+    "Написание и сопровождение миграций данных",
+    "Настройка мониторинга и алертов сервисов",
+    "Перевод синхронных обработчиков на asyncio",
+    "Контейнеризация сервисов и выкладка через CI/CD"
+   ],
+   "requirements": [
+    "Опыт работы с брокерами сообщений Kafka или RabbitMQ",
+    "Знание принципов REST и проектирования API",
+    "Понимание принципов работы индексов и транзакций"
+   ]
+  },
+  {
+   "id": "demo-trudvsem-5005",
+   "source": "trudvsem",
+   "url": "https://example.org/demo/trudvsem/vacancy/5005",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-10-21",
+   "level": "middle",
+   "skills": [
+    "docker",
+    "fastapi",
+    "git",
+    "kafka",
+    "linux",
+    "postgresql",
+    "prometheus",
+    "pytest",
+    "python",
+    "redis",
+    "sql",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Написание и сопровождение миграций данных",
+    "Интеграция сервисов через Kafka"
+   ],
+   "requirements": [
+    "Опыт написания тестов на pytest",
+    "Опыт работы с SQLAlchemy и Alembic",
+    "Опыт работы с Docker, понимание CI/CD",
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL"
+   ]
+  },
+  {
+   "id": "demo-trudvsem-5006",
+   "source": "trudvsem",
+   "url": "https://example.org/demo/trudvsem/vacancy/5006",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-10-24",
+   "level": "senior",
+   "skills": [
+    "asyncio",
+    "ci/cd",
+    "docker",
+    "fastapi",
+    "postgresql",
+    "prometheus",
+    "pytest",
+    "python",
+    "redis",
+    "rest"
+   ],
+   "tasks": [
+    "Перевод синхронных обработчиков на asyncio",
+    "Контейнеризация сервисов и выкладка через CI/CD",
+    "Разработка REST API на FastAPI"
+   ],
+   "requirements": [
+    "Знание принципов REST и проектирования API",
+    "Понимание принципов работы HTTP"
+   ]
+  },
+  {
+   "id": "demo-trudvsem-5007",
+   "source": "trudvsem",
+   "url": "https://example.org/demo/trudvsem/vacancy/5007",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-10-21",
+   "level": "middle",
+   "skills": [
+    "asyncio",
+    "django",
+    "django rest framework",
+    "docker",
+    "linux",
+    "prometheus",
+    "pytest",
+    "python",
+    "sql",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Профилирование и ускорение медленных участков сервиса",
+    "Перевод синхронных обработчиков на asyncio"
+   ],
+   "requirements": [
+    "Знание Django ORM и Django REST Framework",
+    "Опыт работы с Docker, понимание CI/CD",
+    "Опыт работы с SQLAlchemy и Alembic",
+    "Опыт написания тестов на pytest"
+   ]
+  },
+  {
+   "id": "demo-trudvsem-5008",
+   "source": "trudvsem",
+   "url": "https://example.org/demo/trudvsem/vacancy/5008",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-10-05",
+   "level": "senior",
+   "skills": [
+    "ci/cd",
+    "docker",
+    "fastapi",
+    "git",
+    "nginx",
+    "postgresql",
+    "python",
+    "sql",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Оптимизация медленных SQL-запросов",
+    "Разработка и поддержка сервисов на Django и DRF"
+   ],
+   "requirements": [
+    "Знание принципов REST и проектирования API",
+    "Понимание асинхронного программирования (asyncio)",
+    "Опыт работы с SQLAlchemy и Alembic",
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL"
+   ]
+  },
+  {
+   "id": "demo-trudvsem-5009",
+   "source": "trudvsem",
+   "url": "https://example.org/demo/trudvsem/vacancy/5009",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-09-16",
+   "level": "middle",
+   "skills": [
+    "asyncio",
+    "django",
+    "django rest framework",
+    "docker",
+    "grafana",
+    "linux",
+    "nginx",
+    "postgresql",
+    "prometheus",
+    "pytest",
+    "python",
+    "redis",
+    "sql",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Настройка мониторинга и алертов сервисов",
+    "Контейнеризация сервисов и выкладка через CI/CD",
+    "Кэширование ответов и сессий в Redis"
+   ],
+   "requirements": [
+    "Опыт работы с Docker, понимание CI/CD",
+    "Знание Django ORM и Django REST Framework",
+    "Опыт коммерческой разработки на Python от 3 лет",
+    "Опыт настройки мониторинга (Prometheus, Grafana)"
+   ]
+  },
+  {
+   "id": "demo-trudvsem-5010",
+   "source": "trudvsem",
+   "url": "https://example.org/demo/trudvsem/vacancy/5010",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-09-27",
+   "level": "middle",
+   "skills": [
+    "docker",
+    "fastapi",
+    "graphql",
+    "linux",
+    "postgresql",
+    "python",
+    "redis"
+   ],
+   "tasks": [
+    "Кэширование ответов и сессий в Redis",
+    "Разбор инцидентов в продакшене и устранение причин",
+    "Разработка и поддержка REST API на FastAPI",
+    "Оптимизация медленных SQL-запросов"
+   ],
+   "requirements": [
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL",
+    "Опыт работы с Redis",
+    "Опыт работы с SQLAlchemy и Alembic"
+   ]
+  },
+  {
+   "id": "demo-trudvsem-5011",
+   "source": "trudvsem",
+   "url": "https://example.org/demo/trudvsem/vacancy/5011",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-09-26",
+   "level": "middle",
+   "skills": [
+    "asyncio",
+    "docker",
+    "fastapi",
+    "grafana",
+    "postgresql",
+    "pytest",
+    "python",
+    "rest"
+   ],
+   "tasks": [
+    "Проектирование схемы базы данных PostgreSQL",
+    "Покрытие кода автотестами на pytest"
+   ],
+   "requirements": [
+    "Понимание принципов работы HTTP",
+    "Опыт настройки мониторинга (Prometheus, Grafana)",
+    "Опыт написания тестов на pytest",
+    "Понимание принципов работы индексов и транзакций"
+   ]
+  },
+  {
+   "id": "demo-trudvsem-5012",
+   "source": "trudvsem",
+   "url": "https://example.org/demo/trudvsem/vacancy/5012",
+   "title": "Backend-разработчик Python",
+   "published_at": "2026-11-10",
+   "level": null,
+   "skills": [
+    "asyncio",
+    "celery",
+    "docker",
+    "git",
+    "kubernetes",
+    "postgresql",
+    "python",
+    "rabbitmq",
+    "redis",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Написание и сопровождение миграций данных",
+    "Перевод синхронных обработчиков на asyncio",
+    "Контейнеризация сервисов и выкладка через CI/CD"
+   ],
+   "requirements": [
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL",
+    "Знание алгоритмов и структур данных",
+    "Опыт работы с брокерами сообщений Kafka или RabbitMQ",
+    "Понимание асинхронного программирования (asyncio)"
+   ]
+  },
+  {
+   "id": "demo-trudvsem-5013",
+   "source": "trudvsem",
+   "url": "https://example.org/demo/trudvsem/vacancy/5013",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-10-26",
+   "level": "middle",
+   "skills": [
+    "django",
+    "docker",
+    "fastapi",
+    "kubernetes",
+    "linux",
+    "postgresql",
+    "python",
+    "rest",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Контейнеризация сервисов и выкладка через CI/CD",
+    "Перевод синхронных обработчиков на asyncio",
+    "Проектирование API для мобильного и веб-клиентов",
+    "Проектирование схемы базы данных PostgreSQL"
+   ],
+   "requirements": [
+    "Опыт коммерческой разработки на Python от 3 лет",
+    "Понимание микросервисной архитектуры",
+    "Опыт работы с Docker, понимание CI/CD",
+    "Понимание принципов работы HTTP"
+   ]
+  },
+  {
+   "id": "demo-trudvsem-5014",
+   "source": "trudvsem",
+   "url": "https://example.org/demo/trudvsem/vacancy/5014",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-09-12",
+   "level": "senior",
+   "skills": [
+    "asyncio",
+    "docker",
+    "git",
+    "linux",
+    "postgresql",
+    "prometheus",
+    "python",
+    "rabbitmq",
+    "redis",
+    "rest",
+    "sql",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Обмен сообщениями между сервисами через RabbitMQ",
+    "Оптимизация медленных SQL-запросов"
+   ],
+   "requirements": [
+    "Знание Linux на уровне уверенного пользователя",
+    "Понимание принципов работы индексов и транзакций"
+   ]
+  },
+  {
+   "id": "demo-trudvsem-5015",
+   "source": "trudvsem",
+   "url": "https://example.org/demo/trudvsem/vacancy/5015",
+   "title": "Python-разработчик (backend)",
+   "published_at": "2026-10-05",
+   "level": "middle",
+   "skills": [
+    "asyncio",
+    "ci/cd",
+    "docker",
+    "fastapi",
+    "git",
+    "postgresql",
+    "python",
+    "rabbitmq",
+    "rest",
+    "sql",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Разработка REST API на FastAPI",
+    "Обмен сообщениями между сервисами через RabbitMQ",
+    "Профилирование и ускорение медленных участков сервиса"
+   ],
+   "requirements": [
+    "Понимание принципов работы HTTP",
+    "Понимание асинхронного программирования (asyncio)",
+    "Уверенное знание SQL и опыт оптимизации запросов в PostgreSQL",
+    "Знание принципов REST и проектирования API"
+   ]
+  },
+  {
+   "id": "demo-trudvsem-5016",
+   "source": "trudvsem",
+   "url": "https://example.org/demo/trudvsem/vacancy/5016",
+   "title": "Senior Python backend-разработчик",
+   "published_at": "2026-09-20",
+   "level": "senior",
+   "skills": [
+    "asyncio",
+    "celery",
+    "django",
+    "fastapi",
+    "git",
+    "linux",
+    "postgresql",
+    "pytest",
+    "python",
+    "rabbitmq",
+    "redis",
+    "sql",
+    "sqlalchemy"
+   ],
+   "tasks": [
+    "Разбор инцидентов в продакшене и устранение причин",
+    "Написание и сопровождение миграций данных"
+   ],
+   "requirements": [
+    "Опыт работы с SQLAlchemy и Alembic",
+    "Знание Django ORM и Django REST Framework",
+    "Понимание ООП, SOLID и паттернов проектирования"
+   ]
+  },
+  {
+   "id": "demo-trudvsem-5017",
+   "source": "trudvsem",
+   "url": "https://example.org/demo/trudvsem/vacancy/5017",
+   "title": "Junior Python-разработчик",
+   "published_at": "2026-09-23",
+   "level": "junior",
+   "skills": [
+    "asyncio",
+    "celery",
+    "fastapi",
+    "git",
+    "grafana",
+    "linux",
+    "nginx",
+    "python",
+    "rest"
+   ],
+   "tasks": [
+    "Разработка фоновых задач на Celery",
+    "Проектирование API для мобильного и веб-клиентов"
+   ],
+   "requirements": [
+    "Понимание принципов работы HTTP",
+    "Опыт настройки мониторинга (Prometheus, Grafana)"
+   ]
+  }
+ ],
+ "snapshots": [
+  {
+   "collected_at": "2026-08-24",
+   "source": "hh",
+   "vacancies": 64,
+   "skill_counts": {
+    "python": 64,
+    "postgresql": 47,
+    "sql": 36,
+    "docker": 38,
+    "git": 41,
+    "rest": 35,
+    "fastapi": 21,
+    "django": 32,
+    "django rest framework": 22,
+    "redis": 27,
+    "celery": 20,
+    "kafka": 11,
+    "rabbitmq": 17,
+    "asyncio": 14,
+    "sqlalchemy": 20,
+    "pytest": 26,
+    "linux": 32,
+    "kubernetes": 15,
+    "ci/cd": 21,
+    "flask": 12,
+    "nginx": 14,
+    "prometheus": 8,
+    "grafana": 8,
+    "graphql": 5
+   }
+  },
+  {
+   "collected_at": "2026-09-21",
+   "source": "hh",
+   "vacancies": 61,
+   "skill_counts": {
+    "python": 61,
+    "postgresql": 46,
+    "sql": 34,
+    "docker": 38,
+    "git": 39,
+    "rest": 34,
+    "fastapi": 24,
+    "django": 26,
+    "django rest framework": 18,
+    "redis": 26,
+    "celery": 19,
+    "kafka": 13,
+    "rabbitmq": 16,
+    "asyncio": 16,
+    "sqlalchemy": 21,
+    "pytest": 25,
+    "linux": 30,
+    "kubernetes": 16,
+    "ci/cd": 21,
+    "flask": 10,
+    "nginx": 13,
+    "prometheus": 8,
+    "grafana": 8,
+    "graphql": 5
+   }
+  },
+  {
+   "collected_at": "2026-10-19",
+   "source": "hh",
+   "vacancies": 69,
+   "skill_counts": {
+    "python": 69,
+    "postgresql": 53,
+    "sql": 38,
+    "docker": 45,
+    "git": 43,
+    "rest": 39,
+    "fastapi": 32,
+    "django": 25,
+    "django rest framework": 17,
+    "redis": 31,
+    "celery": 21,
+    "kafka": 18,
+    "rabbitmq": 17,
+    "asyncio": 22,
+    "sqlalchemy": 26,
+    "pytest": 29,
+    "linux": 34,
+    "kubernetes": 19,
+    "ci/cd": 24,
+    "flask": 9,
+    "nginx": 14,
+    "prometheus": 10,
+    "grafana": 10,
+    "graphql": 5
+   }
+  },
+  {
+   "collected_at": "2026-11-16",
+   "source": "hh",
+   "vacancies": 72,
+   "skill_counts": {
+    "celery": 13,
+    "docker": 53,
+    "fastapi": 41,
+    "linux": 36,
+    "postgresql": 60,
+    "python": 72,
+    "ci/cd": 27,
+    "git": 48,
+    "prometheus": 6,
+    "sql": 34,
+    "asyncio": 25,
+    "rest": 39,
+    "rabbitmq": 21,
+    "redis": 30,
+    "sqlalchemy": 23,
+    "django": 31,
+    "pytest": 22,
+    "grafana": 9,
+    "kafka": 23,
+    "kubernetes": 17,
+    "django rest framework": 15,
+    "flask": 6,
+    "nginx": 14,
+    "graphql": 4
+   }
+  },
+  {
+   "collected_at": "2026-11-16",
+   "source": "trudvsem",
+   "vacancies": 18,
+   "skill_counts": {
+    "django": 5,
+    "django rest framework": 3,
+    "docker": 15,
+    "kafka": 4,
+    "linux": 12,
+    "postgresql": 16,
+    "python": 18,
+    "redis": 11,
+    "rest": 8,
+    "sql": 10,
+    "asyncio": 12,
+    "kubernetes": 5,
+    "pytest": 7,
+    "rabbitmq": 5,
+    "ci/cd": 4,
+    "fastapi": 12,
+    "git": 8,
+    "celery": 4,
+    "nginx": 4,
+    "prometheus": 6,
+    "sqlalchemy": 9,
+    "grafana": 3,
+    "graphql": 1
+   }
+  }
+ ],
+ "esco": {
+  "version": "v1.2.0",
+  "collected_at": "2026-11-10",
+  "occupation": {
+   "title": "software developer",
+   "uri": "https://example.org/demo/esco/occupation/software-developer"
+  },
+  "skills": [
+   {
+    "title": "Python (computer programming)",
+    "title_ru": "Программирование на Python",
+    "type": "knowledge",
+    "relations": [
+     "essential"
+    ],
+    "uri": "https://example.org/demo/esco/skill/1"
+   },
+   {
+    "title": "computer programming",
+    "title_ru": "Программирование",
+    "type": "knowledge",
+    "relations": [
+     "essential"
+    ],
+    "uri": "https://example.org/demo/esco/skill/2"
+   },
+   {
+    "title": "SQL",
+    "title_ru": "SQL",
+    "type": "knowledge",
+    "relations": [
+     "optional"
+    ],
+    "uri": "https://example.org/demo/esco/skill/3"
+   },
+   {
+    "title": "query languages",
+    "title_ru": "Языки запросов",
+    "type": "knowledge",
+    "relations": [
+     "optional"
+    ],
+    "uri": "https://example.org/demo/esco/skill/4"
+   },
+   {
+    "title": "tools for software configuration management",
+    "title_ru": "Системы управления версиями",
+    "type": "knowledge",
+    "relations": [
+     "essential"
+    ],
+    "uri": "https://example.org/demo/esco/skill/5"
+   },
+   {
+    "title": "ICT debugging tools",
+    "title_ru": "Инструменты отладки",
+    "type": "knowledge",
+    "relations": [
+     "essential"
+    ],
+    "uri": "https://example.org/demo/esco/skill/6"
+   },
+   {
+    "title": "debug software",
+    "title_ru": "Отладка ПО",
+    "type": "skill/competence",
+    "relations": [
+     "essential"
+    ],
+    "uri": "https://example.org/demo/esco/skill/7"
+   },
+   {
+    "title": "interpret technical requirements",
+    "title_ru": "Разбор технических требований",
+    "type": "skill/competence",
+    "relations": [
+     "essential"
+    ],
+    "uri": "https://example.org/demo/esco/skill/8"
+   },
+   {
+    "title": "develop software prototype",
+    "title_ru": "Разработка прототипов ПО",
+    "type": "skill/competence",
+    "relations": [
+     "essential"
+    ],
+    "uri": "https://example.org/demo/esco/skill/9"
+   },
+   {
+    "title": "perform software unit testing",
+    "title_ru": "Модульное тестирование",
+    "type": "skill/competence",
+    "relations": [
+     "optional"
+    ],
+    "uri": "https://example.org/demo/esco/skill/10"
+   },
+   {
+    "title": "use software design patterns",
+    "title_ru": "Применение паттернов проектирования",
+    "type": "skill/competence",
+    "relations": [
+     "optional"
+    ],
+    "uri": "https://example.org/demo/esco/skill/11"
+   },
+   {
+    "title": "utilise concurrent programming",
+    "title_ru": "Конкурентное программирование",
+    "type": "skill/competence",
+    "relations": [
+     "optional"
+    ],
+    "uri": "https://example.org/demo/esco/skill/12"
+   },
+   {
+    "title": "migrate existing data",
+    "title_ru": "Миграция данных",
+    "type": "skill/competence",
+    "relations": [
+     "optional"
+    ],
+    "uri": "https://example.org/demo/esco/skill/13"
+   },
+   {
+    "title": "integrate system components",
+    "title_ru": "Интеграция компонентов системы",
+    "type": "skill/competence",
+    "relations": [
+     "optional"
+    ],
+    "uri": "https://example.org/demo/esco/skill/14"
+   }
+  ]
+ },
+ "onet": {
+  "version": "30.0",
+  "collected_at": "2026-09-30",
+  "occupation_code": "15-1252.00",
+  "occupation_title": "Software Developers",
+  "tasks": [
+   {
+    "id": "demo-1",
+    "text": "Modify existing software to correct errors, adapt it to new hardware or improve its performance.",
+    "type": "Core",
+    "importance": 4.3
+   },
+   {
+    "id": "demo-2",
+    "text": "Analyze user needs and software requirements to determine feasibility of design within time and cost constraints.",
+    "type": "Core",
+    "importance": 4.1
+   },
+   {
+    "id": "demo-3",
+    "text": "Design, develop and modify software systems, using analysis to predict and measure outcomes.",
+    "type": "Core",
+    "importance": 4.0
+   },
+   {
+    "id": "demo-4",
+    "text": "Develop or direct software system testing or validation procedures and documentation.",
+    "type": "Core",
+    "importance": 4.0
+   },
+   {
+    "id": "demo-5",
+    "text": "Confer with systems analysts, engineers and programmers to design systems.",
+    "type": "Core",
+    "importance": 3.9
+   },
+   {
+    "id": "demo-6",
+    "text": "Store, retrieve and manipulate data for analysis of system capabilities and requirements.",
+    "type": "Core",
+    "importance": 3.8
+   },
+   {
+    "id": "demo-7",
+    "text": "Determine system performance standards.",
+    "type": "Supplemental",
+    "importance": 3.5
+   },
+   {
+    "id": "demo-8",
+    "text": "Monitor functioning of equipment to ensure the system operates according to specifications.",
+    "type": "Supplemental",
+    "importance": 3.4
+   },
+   {
+    "id": "demo-9",
+    "text": "Recommend software upgrades for existing programs and systems.",
+    "type": "Supplemental",
+    "importance": 3.3
+   }
+  ]
+ },
+ "cards": [
+  {
+   "id": "demo-card-1",
+   "reviewed_at": "2026-11-12",
+   "content": {
+    "title": "Медленный отчёт по заказам в PostgreSQL",
+    "task": [
+     {
+      "id": "demo-card-1-task-0",
+      "text": "Отчёт по заказам строился минуту.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-1-task-0"
+      ]
+     }
+    ],
+    "context": [
+     {
+      "id": "demo-card-1-context-0",
+      "text": "Таблица заказов выросла до 40 миллионов строк.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-1-context-0"
+      ]
+     }
+    ],
+    "actions": [
+     {
+      "id": "demo-card-1-actions-0",
+      "text": "Я посмотрел план запроса через EXPLAIN ANALYZE и добавил составной индекс.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-1-actions-0"
+      ],
+      "responsibility": "personal",
+      "skills": [
+       "postgresql"
+      ]
+     }
+    ],
+    "decisions": [
+     {
+      "id": "demo-card-1-decisions-0",
+      "text": "Индекс выбрал, потому что это не требовало переписывать код отчёта.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-1-decisions-0"
+      ]
+     }
+    ],
+    "verification": [
+     {
+      "id": "demo-card-1-verification-0",
+      "text": "Сравнил до и после на тех же данных: было 60 секунд, стало 3.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-1-verification-0"
+      ]
+     }
+    ],
+    "errors": [],
+    "limitations": [],
+    "unknown_fields": []
+   }
+  },
+  {
+   "id": "demo-card-2",
+   "reviewed_at": "2026-11-05",
+   "content": {
+    "title": "Очередь задач Celery не успевала разбираться",
+    "task": [
+     {
+      "id": "demo-card-2-task-0",
+      "text": "К вечеру в очереди фоновых задач копилось 50 тысяч задач.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-2-task-0"
+      ]
+     }
+    ],
+    "context": [],
+    "actions": [
+     {
+      "id": "demo-card-2-actions-0",
+      "text": "Я разделил задачи на две очереди и вынес тяжёлые в отдельный воркер.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-2-actions-0"
+      ],
+      "responsibility": "personal",
+      "skills": [
+       "celery"
+      ]
+     },
+     {
+      "id": "demo-card-2-actions-1",
+      "text": "Я настроил алерт на длину очереди в Grafana.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-2-actions-1"
+      ],
+      "responsibility": "personal",
+      "skills": [
+       "grafana"
+      ]
+     }
+    ],
+    "decisions": [
+     {
+      "id": "demo-card-2-decisions-0",
+      "text": "Разделил очереди, потому что тяжёлые выгрузки блокировали короткие уведомления.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-2-decisions-0"
+      ]
+     }
+    ],
+    "verification": [
+     {
+      "id": "demo-card-2-verification-0",
+      "text": "Две недели смотрел на график: к вечеру в очереди не больше тысячи задач.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-2-verification-0"
+      ]
+     }
+    ],
+    "errors": [],
+    "limitations": [],
+    "unknown_fields": []
+   }
+  },
+  {
+   "id": "demo-card-3",
+   "reviewed_at": "2026-10-28",
+   "content": {
+    "title": "Миграция заблокировала таблицу на релизе",
+    "task": [
+     {
+      "id": "demo-card-3-task-0",
+      "text": "Миграция с добавлением колонки заблокировала таблицу пользователей во время релиза.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-3-task-0"
+      ]
+     }
+    ],
+    "context": [
+     {
+      "id": "demo-card-3-context-0",
+      "text": "Таблица под нагрузкой, окно релиза 15 минут.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-3-context-0"
+      ]
+     }
+    ],
+    "actions": [
+     {
+      "id": "demo-card-3-actions-0",
+      "text": "Я разбил миграцию на шаги: добавил колонку без значения по умолчанию и заполнил её пачками.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-3-actions-0"
+      ],
+      "responsibility": "personal",
+      "skills": [
+       "postgresql",
+       "django"
+      ]
+     }
+    ],
+    "decisions": [
+     {
+      "id": "demo-card-3-decisions-0",
+      "text": "Сделал пачками, потому что так каждая блокировка короткая.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-3-decisions-0"
+      ]
+     }
+    ],
+    "verification": [
+     {
+      "id": "demo-card-3-verification-0",
+      "text": "На стенде с копией данных прогнал миграцию: блокировки не дольше секунды.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-3-verification-0"
+      ]
+     }
+    ],
+    "errors": [
+     {
+      "id": "demo-card-3-errors-0",
+      "text": "Сначала увеличил lock_timeout, но это не помогло.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-3-errors-0"
+      ]
+     }
+    ],
+    "limitations": [],
+    "unknown_fields": []
+   }
+  },
+  {
+   "id": "demo-card-4",
+   "reviewed_at": "2026-11-18",
+   "content": {
+    "title": "Таймауты при вызове платёжного API",
+    "task": [
+     {
+      "id": "demo-card-4-task-0",
+      "text": "Каждый пятый запрос к платёжному API падал по таймауту.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-4-task-0"
+      ]
+     }
+    ],
+    "context": [],
+    "actions": [
+     {
+      "id": "demo-card-4-actions-0",
+      "text": "Я добавил повторы с экспоненциальной задержкой и ограничил ожидание пятью секундами.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-4-actions-0"
+      ],
+      "responsibility": "personal"
+     },
+     {
+      "id": "demo-card-4-actions-1",
+      "text": "Мы перевели вызовы на асинхронный клиент на asyncio.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-4-actions-1"
+      ],
+      "responsibility": "shared",
+      "skills": [
+       "asyncio"
+      ]
+     }
+    ],
+    "decisions": [
+     {
+      "id": "demo-card-4-decisions-0",
+      "text": "Повторы выбрал, потому что провайдер сам рекомендует их в документации.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-4-decisions-0"
+      ]
+     }
+    ],
+    "verification": [
+     {
+      "id": "demo-card-4-verification-0",
+      "text": "По логам за неделю доля ошибок упала с 20% до 1%.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-4-verification-0"
+      ]
+     }
+    ],
+    "errors": [],
+    "limitations": [],
+    "unknown_fields": []
+   }
+  },
+  {
+   "id": "demo-card-5",
+   "reviewed_at": "2025-12-02",
+   "content": {
+    "title": "Утечка памяти в сервисе выгрузки",
+    "task": [
+     {
+      "id": "demo-card-5-task-0",
+      "text": "Сервис выгрузки падал по памяти раз в сутки.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-5-task-0"
+      ]
+     }
+    ],
+    "context": [],
+    "actions": [
+     {
+      "id": "demo-card-5-actions-0",
+      "text": "Я снял профиль памяти через tracemalloc и нашёл кэш без ограничения размера.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-5-actions-0"
+      ],
+      "responsibility": "personal",
+      "skills": [
+       "python"
+      ]
+     },
+     {
+      "id": "demo-card-5-actions-1",
+      "text": "Я ограничил размер кэша.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-5-actions-1"
+      ],
+      "responsibility": "personal"
+     }
+    ],
+    "decisions": [],
+    "verification": [
+     {
+      "id": "demo-card-5-verification-0",
+      "text": "Неделю следил за графиком памяти: рост прекратился.",
+      "source": "interview",
+      "supporting_message_ids": [
+       "demo-message-5-verification-0"
+      ]
+     }
+    ],
+    "errors": [],
+    "limitations": [],
+    "unknown_fields": [
+     "decision"
+    ]
+   }
+  }
+ ],
+ "sources": [
+  {
+   "provider": "docs",
+   "title": "PostgreSQL 17: использование EXPLAIN",
+   "task": "Оптимизация медленных SQL-запросов",
+   "quote": "EXPLAIN ANALYZE выполняет запрос и показывает фактическое время каждого узла плана.",
+   "technology": "postgresql",
+   "version": "17",
+   "retrieved_on": "2026-11-14",
+   "url": "https://example.org/demo/docs/1"
+  },
+  {
+   "provider": "docs",
+   "title": "FastAPI: зависимости",
+   "task": "Разработка REST API",
+   "quote": "Зависимости позволяют переиспользовать проверку доступа и подключение к базе в разных эндпоинтах.",
+   "technology": "fastapi",
+   "version": "0.115",
+   "retrieved_on": "2026-11-10",
+   "url": "https://example.org/demo/docs/2"
+  },
+  {
+   "provider": "docs",
+   "title": "Celery 5.4: маршрутизация задач",
+   "task": "Фоновые задачи и очереди",
+   "quote": "Задачи можно направлять в разные очереди и обрабатывать их отдельными воркерами.",
+   "technology": "celery",
+   "version": "5.4",
+   "retrieved_on": "2026-09-02",
+   "url": "https://example.org/demo/docs/3"
+  },
+  {
+   "provider": "docs",
+   "title": "Python 3.13: корутины и задачи asyncio",
+   "task": "Асинхронные обработчики",
+   "quote": "asyncio.timeout ограничивает время ожидания группы операций.",
+   "technology": "asyncio",
+   "version": "3.13",
+   "retrieved_on": "2026-11-01",
+   "url": "https://example.org/demo/docs/4"
+  },
+  {
+   "provider": "github",
+   "title": "Django: миграции и блокировки больших таблиц",
+   "task": "Миграции данных без простоя",
+   "quote": "Добавление колонки со значением по умолчанию на большой таблице держит эксклюзивную блокировку.",
+   "technology": "django",
+   "version": "5.1",
+   "retrieved_on": "2026-10-15",
+   "url": "https://example.org/demo/github/5"
+  },
+  {
+   "provider": "hn",
+   "title": "Обсуждение: как следить за отставанием консьюмеров Kafka",
+   "task": "Обмен сообщениями через Kafka",
+   "quote": "Отставание консьюмера по партициям — главный сигнал, что сервис не успевает обрабатывать поток.",
+   "technology": "kafka",
+   "version": null,
+   "retrieved_on": "2026-11-08",
+   "url": "https://example.org/demo/hn/6"
+  },
+  {
+   "provider": "openalex",
+   "title": "Статья: декомпозиция монолита на микросервисы",
+   "task": "Декомпозиция монолита",
+   "quote": "Границы сервисов чаще всего проводят по бизнес-доменам и владению данными.",
+   "technology": null,
+   "version": null,
+   "retrieved_on": "2026-06-10",
+   "url": "https://example.org/demo/openalex/7"
+  }
+ ]
+}

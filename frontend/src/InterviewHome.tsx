@@ -10,7 +10,7 @@ const statusLabels = {
 };
 
 const dateFormat = new Intl.DateTimeFormat('ru', { dateStyle: 'medium', timeStyle: 'short' });
-const previewCount = 6;
+const previewCount = 5;
 const projectFields: [keyof ProjectContext, string, string, number][] = [
   ['task', 'Что нужно было сделать в проекте?', 'Например, перенести оплату на нового провайдера', 1000],
   ['period', 'Когда вы над ним работали?', 'Например, с мая по сентябрь 2025', 300],

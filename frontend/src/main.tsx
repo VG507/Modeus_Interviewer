@@ -3,8 +3,9 @@ import { createRoot } from 'react-dom/client';
 import { api, ApiError, command, describe } from './api';
 import { InterviewHome } from './InterviewHome';
 import { InterviewScreen } from './InterviewScreen';
-import { EditorData, type DataView } from './EditorData';
+import { EditorData, dataTabForRoute } from './EditorData';
 import { CardsList, CardScreen, CatalogCard } from './Cards';
+import { Reports } from './Reports';
 import { Themes } from './Themes';
 import { ThemeToggle } from './ThemeToggle';
 import './style.css';
@@ -27,8 +28,7 @@ function App() {
   const reviewView = route === '#/review' || route === '#/review/published' ||
     (demoModerator && (route === '' || route === '#'));
   const catalogId = themesView ? undefined : route.match(/^#\/catalog\/([a-zA-Z0-9_-]+)$/)?.[1];
-  const dataView: DataView | null = route === '#/data/sources' || route === '#/discovery' ? 'sources' :
-    route === '#/data' || route === '#/data/vacancies' || route === '#/vacancies' ? 'vacancies' : null;
+  const dataView = dataTabForRoute(route);
   const lock = useRef(false);
 
   useEffect(() => {
@@ -104,13 +104,14 @@ function App() {
 
   return <main>
     <header className="masthead">
-      <span className="brand">modeus</span>
+      <span className="brand">Modeus</span>
       <nav className="actions" aria-label="Разделы Modeus">
         {!demoModerator && <a href="#">Интервью</a>}
         <a href="#/catalog">Каталог</a>
         {user && !demoModerator && <a href="#/cards">Мои карточки</a>}
         {user?.is_editor && <a href="#/review" aria-current={reviewView ? 'page' : undefined}>Модерация</a>}
         {canManageData && <a href="#/data" aria-current={dataView ? 'page' : undefined}>Данные</a>}
+        {canManageData && <a href="#/report" aria-current={route === '#/report' ? 'page' : undefined}>Итоговый отчёт</a>}
         {!user && (route === '#/catalog' || catalogId || themesView) && <a href="#">Войти</a>}
       </nav>
       <div className="masthead-side">
@@ -157,6 +158,9 @@ function App() {
       route === '#/cards' ? <CardsList key="own" scope="own" onSessionExpired={expireSession}/> :
       dataView ?
         canManageData ? <EditorData view={dataView} onSessionExpired={expireSession}/> :
+          <p role="alert">Для этого раздела нужен доступ к управлению данными.</p> :
+      route === '#/report' ?
+        canManageData ? <Reports onSessionExpired={expireSession}/> :
           <p role="alert">Для этого раздела нужен доступ к управлению данными.</p> :
       reviewView ?
         user.is_editor ? <CardsList key={route} scope={route === '#/review/published' ? 'published' : 'review'}

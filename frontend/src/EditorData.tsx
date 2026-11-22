@@ -1,22 +1,42 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, describe } from './api';
-import { Discovery } from './Discovery';
+import { Discovery, type Provider } from './Discovery';
 import { OnetTasks } from './OnetTasks';
-import { ProfessionCollection } from './ProfessionCollection';
+import { CollectionOverview, EscoPanel, useCollectionStatus } from './ProfessionCollection';
 import { Vacancies } from './Vacancies';
 
 type Profile = { id: string; title: string };
-export type DataView = 'vacancies' | 'sources';
+type DataTab = 'overview' | 'vacancies' | 'esco' | 'onet' | 'sources' | Provider;
+const tabs: [DataTab, string][] = [
+  ['overview', 'Обзор'],
+  ['vacancies', 'Вакансии'],
+  ['esco', 'ESCO'],
+  ['onet', 'O*NET'],
+  ['github', 'GitHub Issues'],
+  ['trends', 'GitHub Trends'],
+  ['docs', 'Документация'],
+  ['openalex', 'Научные статьи'],
+  ['skills', 'Agent Skills'],
+  ['habr', 'Хабр'],
+  ['sources', 'Все материалы'],
+];
+const discoveryTabs: readonly Provider[] = ['github', 'trends', 'docs', 'openalex', 'skills', 'habr'];
 
-export function EditorData({ view, onSessionExpired }: { view: DataView; onSessionExpired: () => void }) {
+function tabRoute(tab: DataTab) {
+  return tab === 'overview' ? '#/data' : '#/data/' + tab;
+}
+
+export function dataTabForRoute(route: string): DataTab | undefined {
+  if (route === '#/vacancies') return 'vacancies';
+  if (route === '#/discovery') return 'sources';
+  return tabs.find(([id]) => tabRoute(id) === route)?.[0];
+}
+
+export function EditorData({ view, onSessionExpired }: { view: DataTab; onSessionExpired: () => void }) {
   const [profiles, setProfiles] = useState<Profile[] | null>(null);
   const [profession, setProfession] = useState('');
   const [loadError, setLoadError] = useState('');
   const [reload, setReload] = useState(0);
-  const [collectionRefresh, setCollectionRefresh] = useState(0);
-  const [documentationRequest, setDocumentationRequest] = useState(0);
-  const materials = useRef<HTMLDivElement>(null);
-  const refreshMaterials = useCallback(() => setCollectionRefresh(value => value + 1), []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -38,13 +58,7 @@ export function EditorData({ view, onSessionExpired }: { view: DataView; onSessi
   function profileSaved(profile: Profile) {
     setProfiles(current => [...(current ?? []).filter(item => item.id !== profile.id), profile]);
     setProfession(current => current === profession ? profile.id : current);
-    setDocumentationRequest(0);
     setReload(value => value + 1);
-  }
-
-  function reviewDocumentation() {
-    setDocumentationRequest(value => value + 1);
-    materials.current?.scrollIntoView({ block: 'start' });
   }
 
   return <section className="stack">
@@ -52,7 +66,7 @@ export function EditorData({ view, onSessionExpired }: { view: DataView; onSessi
     <div className="panel">
       <label htmlFor="data-profession">Профессия</label>
       <select id="data-profession" value={profession} disabled={!profiles?.length}
-        onChange={event => { setDocumentationRequest(0); setProfession(event.target.value); }}>
+        onChange={event => setProfession(event.target.value)}>
         {!profiles?.length && <option value="">{profiles ? 'Нет профессий' : 'Загружаем профессии'}</option>}
         {profiles?.map(profile => <option key={profile.id} value={profile.id}>{profile.title || profile.id}</option>)}
       </select>
@@ -60,22 +74,46 @@ export function EditorData({ view, onSessionExpired }: { view: DataView; onSessi
         <button type="button" className="secondary" onClick={() => setReload(value => value + 1)}>Повторить загрузку</button>
       </>}
     </div>
-    <nav className="actions data-nav" aria-label="Данные по профессии">
-      <a href="#/data/vacancies" aria-current={view === 'vacancies' ? 'page' : undefined}>Вакансии</a>
-      <a href="#/data/sources" aria-current={view === 'sources' ? 'page' : undefined}>Источники</a>
-    </nav>
-    {profession && <ProfessionCollection key={profession} profession={profession} showSourceDetails={view === 'sources'}
-      onSessionExpired={onSessionExpired} onCompleted={refreshMaterials} onReviewDocumentation={reviewDocumentation}/>}
-    <div hidden={view !== 'vacancies'}>
-      <Vacancies key={profession} profile={profession} visible={view === 'vacancies'} collectionRefresh={collectionRefresh}
+    <div className="data-layout">
+      <nav className="panel source-menu" aria-label="Источники данных">
+        {tabs.map(([id, label]) => <a key={id} href={tabRoute(id)} className="quiet"
+          aria-current={view === id ? 'page' : undefined}>{label}</a>)}
+      </nav>
+      <ProfessionData key={profession} profession={profession} view={view} profilesLoaded={profiles !== null}
         onProfileSaved={profileSaved} onSessionExpired={onSessionExpired}/>
     </div>
-    <div hidden={view !== 'sources'}>
-      {view === 'sources' && profession && <OnetTasks key={profession} profession={profession}
-        onSessionExpired={onSessionExpired}/>}
-      {profession ? <div ref={materials}><Discovery key={profession} profession={profession} collectionRefresh={collectionRefresh}
-        documentationRequest={documentationRequest} onSessionExpired={onSessionExpired}/></div> : profiles &&
-        <p>Добавьте профессию на вкладке «Вакансии», чтобы собирать источники.</p>}
-    </div>
   </section>;
+}
+
+function ProfessionData({ profession, view, profilesLoaded, onProfileSaved, onSessionExpired }: {
+  profession: string; view: DataTab; profilesLoaded: boolean;
+  onProfileSaved: (profile: Profile) => void; onSessionExpired: () => void;
+}) {
+  const [collectionRefresh, setCollectionRefresh] = useState(0);
+  const refreshMaterials = useCallback(() => setCollectionRefresh(value => value + 1), []);
+  const collection = useCollectionStatus(profession, onSessionExpired, refreshMaterials);
+  const provider = discoveryTabs.find(id => id === view);
+
+  return <div className="stack">
+    {profession && (view === 'overview' || view === 'vacancies') &&
+      <CollectionOverview status={collection} vacanciesOnly={view === 'vacancies'}/>}
+    <div hidden={view !== 'vacancies'}>
+      <Vacancies profile={profession} visible={view === 'vacancies'} collectionRefresh={collectionRefresh}
+        onProfileSaved={onProfileSaved} onSessionExpired={onSessionExpired}/>
+    </div>
+    {!profession && profilesLoaded && view !== 'vacancies' &&
+      <p>Добавьте профессию на вкладке «Вакансии», чтобы собирать источники.</p>}
+    {profession && view === 'esco' && (collection.quality?.esco ? <div className="panel">
+      {collection.startError && <p role="alert">{collection.startError}</p>}
+      <EscoPanel esco={collection.quality.esco}
+        path={'/discovery/collection/' + encodeURIComponent(profession) + '/esco'}
+        busy={collection.starting || !!collection.run?.running}
+        onCollect={() => void collection.start(undefined, 'esco')} onSaved={collection.refreshQuality}
+        onSessionExpired={onSessionExpired}/>
+    </div> : collection.loadError ? <p role="alert">{collection.loadError}</p> :
+      <p role="status">Загружаем настройки ESCO…</p>)}
+    {profession && view === 'onet' && <OnetTasks profession={profession} onSessionExpired={onSessionExpired}/>}
+    {profession && (provider || view === 'sources') && <Discovery key={view} profession={profession}
+      provider={provider} collectionRefresh={collectionRefresh} onSessionExpired={onSessionExpired}/>}
+  </div>;
 }

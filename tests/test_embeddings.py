@@ -6,12 +6,12 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from backend import embeddings, vectors
 from backend.app import create_app
 from backend.db import CardEmbedding, InterviewSession, KnowledgeCard, User, VacancyCollection, database, now
-from backend.knowledge import published_context
+from backend.knowledge import published_cards, published_context
 from backend.settings import Settings
 from backend.vacancy_context import sources_for_question
 from backend.vacancy_import import prepare_cards
@@ -278,3 +278,22 @@ def test_themes_group_close_cases_and_correlate_with_categories(database_url, mo
         assert cell["testing"]["phi"] < 0
         for outside in (0.1, 0.99):
             assert client.get("/api/v1/catalog/themes", params={"threshold": outside}).status_code == 422
+
+
+def test_search_query_can_use_the_hnsw_index(database_url, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    command.upgrade(Config("alembic.ini"), "head")
+    engine, sessions = database(database_url)
+    try:
+        with sessions() as db:
+            if not vectors.pgvector_column(db):
+                pytest.skip("the index exists only on PostgreSQL with pgvector")
+            statement = embeddings.nearest_cases_statement(
+                "bge-m3", [0.01] * 1024, published_cards().with_only_columns(KnowledgeCard.id), 50)
+            compiled = statement.compile(dialect=db.get_bind().dialect, compile_kwargs={"render_postcompile": True})
+            # A few rows make a scan cheaper than the index; forbid the scan to see that the index fits the query.
+            db.execute(text("set local enable_seqscan = off"))
+            plan = "\n".join(row[0] for row in db.connection().exec_driver_sql("explain " + compiled.string, compiled.params))
+    finally:
+        engine.dispose()
+    assert "Index Scan using card_embeddings_bge_m3_hnsw" in plan

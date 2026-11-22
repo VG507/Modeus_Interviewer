@@ -14,6 +14,7 @@ from backend.auth import current_user, limit_login
 from backend.card_api import router as card_router
 from backend.discovery_api import router as discovery_router
 from backend.documentation import schedule_documentation
+from backend.embeddings import configured as embeddings_configured, schedule_card_index
 from backend.github_evidence import schedule_github_evidence
 from backend.http_errors import LimitRequestBody, error_response, unhandled_error
 from backend.interview_api import router as interview_router
@@ -44,6 +45,8 @@ def create_app(settings: Settings | None = None):
         if settings.documentation_weekly_enabled:
             workers.append(asyncio.create_task(schedule_documentation(sessions)))
         workers.append(asyncio.create_task(schedule_github_evidence(sessions, settings)))
+        if embeddings_configured(settings):
+            workers.append(asyncio.create_task(schedule_card_index(sessions, settings)))
         if settings.telegram_bot_token:
             workers.append(asyncio.create_task(run_bot(app, settings)))
         try:

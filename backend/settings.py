@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     llm_temperature: float | None = Field(default=0, ge=0, le=2)
     llm_seed: int | None = None
     llm_cache: bool = True
+    embedding_base_url: str = ""
+    embedding_model: str = ""
+    embedding_api_key: str = Field(default="", repr=False)
+    embedding_timeout_seconds: int = Field(default=20, ge=1, le=120)
     hh_user_agent: str = ""
     hh_access_token: str = Field(default="", repr=False)
     hh_client_id: str = Field(default="", repr=False)

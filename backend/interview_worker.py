@@ -12,6 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm.exc import StaleDataError
 
 from backend.db import InterviewSession, KnowledgeCard, Message, Topic, now
+from backend.embeddings import case_vector
 from backend.interview_engine import (
     FALLBACK_QUESTIONS,
     InvalidModelOutput,
@@ -28,6 +29,7 @@ from backend.interview_engine import (
 from backend.interview_schemas import CaseState, OPEN_TOPIC_ID
 from backend.knowledge import prior_case_context, publication_versions_current, published_context
 from backend.source_context import skill_sources_current, sources_for_followup
+from backend.vacancy_context import QUESTION_INTENTS
 
 logger = logging.getLogger(__name__)
 
@@ -255,11 +257,14 @@ async def execute_stage(sessions, settings, interview_id, token):
                 previous = prior_case_context(state, message.text or "", recent_answers)
                 if previous and job["intent"] in {"action", "decision", "verification", "context"}:
                     model_state["prior_project_context"] = previous
-            gaps, publication_versions = published_context(db, interview, state, job["intent"])
+            vector = None
+            if job["intent"] in QUESTION_INTENTS:
+                vector = await asyncio.to_thread(case_vector, settings, title, state["facts"])
+            gaps, publication_versions = published_context(db, interview, state, job["intent"], vector)
             if gaps:
                 model_state["knowledge_gaps"] = gaps
             market_sources = sources_for_followup(
-                db, interview.context, model_state, job["intent"], message.text if message else "",
+                db, interview.context, model_state, job["intent"], message.text if message else "", vector,
             )
         if market_sources:
             model_state["market_context"] = [

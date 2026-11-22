@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, commandKeys, describe } from './api';
-import type { Card, CardContent, CardDetail, CardEvidence, CardFact, CardGap, Page, PublicCard, PublicSummary } from './api';
+import type {
+  Card, CardContent, CardDetail, CardEvidence, CardFact, CardGap, Page, PublicCard, PublicSummary, SearchPage,
+} from './api';
 
 type User = { id: string; is_editor: boolean };
 type SessionProps = { onSessionExpired: () => void };
@@ -24,7 +26,22 @@ export function CardsList({ scope, onSessionExpired }: SessionProps & {
   const [topics, setTopics] = useState<string[]>([]);
   const [topic, setTopic] = useState('');
   const [topicError, setTopicError] = useState('');
+  const [query, setQuery] = useState('');
+  const [search, setSearch] = useState('');
+  const [found, setFound] = useState<SearchPage>();
+  const [searchError, setSearchError] = useState('');
   const isCatalog = scope === 'catalog';
+
+  useEffect(() => {
+    if (!search) return;
+    const controller = new AbortController();
+    setFound(undefined);
+    setSearchError('');
+    api<SearchPage>('/catalog/search?' + new URLSearchParams({ q: search }), { signal: controller.signal })
+      .then(page => { if (!controller.signal.aborted) setFound(page); })
+      .catch(error => { if (!controller.signal.aborted) setSearchError(describe(error)); });
+    return () => controller.abort();
+  }, [search]);
 
   useEffect(() => {
     if (!isCatalog) return;
@@ -71,6 +88,31 @@ export function CardsList({ scope, onSessionExpired }: SessionProps & {
     </nav> : null}
     <h1>{headings[scope]}</h1>
     <section className="panel saved">
+      {isCatalog && <form className="composer" role="search" onSubmit={event => {
+        event.preventDefault();
+        setSearch(query.trim());
+      }}>
+        <label htmlFor="catalog-search">Поиск по смыслу</label>
+        <div className="actions">
+          <input id="catalog-search" type="search" maxLength={200} value={query}
+            placeholder="Например: отчёт строится слишком долго" onChange={event => {
+              setQuery(event.target.value);
+              if (!event.target.value.trim()) setSearch('');
+            }}/>
+          <button>Найти</button>
+        </div>
+      </form>}
+      {search ? <>
+        {found?.mode === 'words' && <p className="meta">Поиск по смыслу сейчас недоступен, ищем по совпадению слов.</p>}
+        {!!found?.items.length && <ul>{found.items.map(card => <li key={card.id}>
+          <a href={`#/catalog/${card.id}`}>
+            {card.title}{card.topic_title !== card.title && <span>{card.topic_title}</span>}
+          </a>
+        </li>)}</ul>}
+        {found && !found.items.length && <p>Похожих карточек не нашлось.</p>}
+        {!found && !searchError && <p role="status">Ищем похожие карточки…</p>}
+        {searchError && <p role="alert">{searchError}</p>}
+      </> : <>
       {isCatalog && topics.length > 0 && <div className="composer">
         <label htmlFor="catalog-topic">Тема</label>
         <select id="catalog-topic" value={topic} onChange={event => {
@@ -101,6 +143,7 @@ export function CardsList({ scope, onSessionExpired }: SessionProps & {
         Повторить загрузку
       </button></>}
       {next && !error && <button className="secondary" disabled={loading} onClick={() => setCursor(next)}>Показать ещё</button>}
+      </>}
     </section>
   </>;
 }
@@ -108,11 +151,15 @@ export function CardsList({ scope, onSessionExpired }: SessionProps & {
 export function CatalogCard({ id }: { id: string }) {
   const [card, setCard] = useState<PublicCard>();
   const [error, setError] = useState('');
+  const [similar, setSimilar] = useState<SearchPage['items']>([]);
   useEffect(() => {
     const controller = new AbortController();
     api<PublicCard>(`/catalog/${id}`, { signal: controller.signal }).then(setCard).catch(error => {
       if (!controller.signal.aborted) setError(describe(error));
     });
+    // Similar cases are a hint: the card reads fine without them, so a failure stays quiet.
+    api<SearchPage>(`/catalog/${id}/similar`, { signal: controller.signal })
+      .then(page => { if (!controller.signal.aborted) setSimilar(page.items); }).catch(() => undefined);
     return () => controller.abort();
   }, [id]);
 
@@ -124,6 +171,12 @@ export function CatalogCard({ id }: { id: string }) {
       <div className="card-text">{card.text}</div>
       <CardGaps content={card.content}/>
     </article> : <p role="status">Загружаем карточку…</p>}
+    {card && similar.length > 0 && <section className="panel saved" aria-label="Похожие случаи">
+      <h2>Похожие случаи</h2>
+      <ul>{similar.map(item => <li key={item.id}><a href={`#/catalog/${item.id}`}>
+        {item.title}{item.topic_title !== item.title && <span>{item.topic_title}</span>}
+      </a></li>)}</ul>
+    </section>}
   </>;
 }
 

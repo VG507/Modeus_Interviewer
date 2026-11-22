@@ -13,6 +13,9 @@ from backend.vacancy_samples import fresh_vacancy_samples, trudvsem_samples
 QUESTION_INTENTS = {"action", "decision", "verification", "context"}
 STOP_WORDS = {"быстро", "работа", "работы", "работал", "работать", "система", "системе", "задача", "задачи",
               "команда", "команде", "проект", "проекта", "новый", "после", "сделал", "разработка", "компания"}
+# A duty this close to the case by meaning is a hint even without shared words (bge-m3, measured with
+# scripts/evaluate_embeddings.py: right hints 16 -> 25 of 41 cases, wrong hints stay at 1).
+DUTY_MIN_SCORE = 0.55
 TASK_SIGNALS = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
     r"\b(?:explain|план\w* выполнени\w*|"
     r"(?:индекс\w*|медл\w*|оптимиз\w*|задерж\w*)[^.!?\n]{0,75}(?:запрос\w*|отч[её]т\w*|postgresql)|"
@@ -31,6 +34,21 @@ def keywords(text):
 
 def task_signals(text):
     return {index for index, pattern in enumerate(TASK_SIGNALS) if pattern.search(text)}
+
+
+def duty_score(signals, task_words, case_words, duty, meaning=0.0):
+    """(shared signals, meaning, shared task words, shared case words) of a vacancy duty for the case.
+
+    meaning is the embedding similarity of the case and the duty; it counts from DUTY_MIN_SCORE up.
+    """
+    words = keywords(duty)
+    return (len(signals & task_signals(duty)), meaning if meaning >= DUTY_MIN_SCORE else 0.0,
+            len(task_words & words), len(case_words & words))
+
+
+def duty_fits(score):
+    signal_overlap, meaning, _, case_overlap = score
+    return bool(signal_overlap or meaning or case_overlap >= 2)
 
 
 def years_fit(experience, band):
@@ -63,7 +81,7 @@ def profession_for_question(db, intake, state, intent):
     return None
 
 
-def sources_for_question(db, intake, state, intent, *, profession_id=None):
+def sources_for_question(db, intake, state, intent, *, profession_id=None, case_vector=None):
     profession_id = profession_id or profession_for_question(db, intake, state, intent)
     if profession_id is None:
         return []
@@ -71,7 +89,8 @@ def sources_for_question(db, intake, state, intent, *, profession_id=None):
     if not collection or not collection.approved:
         return []
     trudvsem = trudvsem_samples(db, profession_id).get(profession_id)
-    dated_cards = ((card, stamp) for cards, stamp in fresh_vacancy_samples(collection, trudvsem, now()) for card in cards)
+    dated_cards = [(card, stamp) for cards, stamp in fresh_vacancy_samples(collection, trudvsem, now()) for card in cards]
+    meaning = case_vector.scores(db, {task for card, _ in dated_cards for task in card["tasks"]}) if case_vector else {}
 
     task_text = "\n".join(fact["text"][:500] for fact in state["facts"] if fact["field"] == "task")
     case_text = task_text + "\n" + "\n".join(fact["text"][:500] for fact in state["facts"][-14:] if fact["field"] != "task")
@@ -87,7 +106,7 @@ def sources_for_question(db, intake, state, intent, *, profession_id=None):
         if not years_fit(intake.get("experience", ""), card["experience_band"]):
             continue
         matching_skills = sorted(case_skills.intersection(map(canonical_skill, card["skills"])))
-        task, source_field, score = "", "", (0, 0, 0)
+        task, source_field, score = "", "", (0, 0.0, 0, 0)
         task_citations = {item["field_path"]: item for item in card.get("evidence", [])
                           if item["field_path"].startswith("tasks.")}
         for index, candidate in enumerate(card["tasks"]):
@@ -96,13 +115,11 @@ def sources_for_question(db, intake, state, intent, *, profession_id=None):
                 continue
             if " ".join(candidate.casefold().split()) in normalized_case:
                 continue
-            words = keywords(candidate)
-            candidate_score = (len(signals & task_signals(candidate)), len(task_words & words), len(case_words & words))
+            candidate_score = duty_score(signals, task_words, case_words, candidate, meaning.get(candidate, 0.0))
             if candidate_score > score:
                 task, score = candidate, candidate_score
                 source_field = citation["source_field"]
-        signal_overlap, _, case_overlap = score
-        if not (signal_overlap or case_overlap >= 2):
+        if not duty_fits(score):
             continue
         matches.append(((*score, len(matching_skills)), {
             "vacancy_id": card["id"], "url": card["url"], "snapshot_at": stamp.isoformat() + "Z",

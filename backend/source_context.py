@@ -101,7 +101,7 @@ def technology_fits(excerpt, case):
     return bool(versions) and all(version.split(".")[:len(expected)] == expected for version in versions)
 
 
-def sources_for_followup(db, intake, state, intent, answer_text=""):
+def sources_for_followup(db, intake, state, intent, answer_text="", case_vector=None):
     profession_id = profession_for_question(db, intake, state, intent)
     if profession_id is None:
         return []
@@ -159,7 +159,8 @@ def sources_for_followup(db, intake, state, intent, answer_text=""):
             **({"provider": provider, "item_id": item_id, "revision_digest": digest} if provider == "skills" else {}),
         }))
     if not matches:
-        return sources_for_question(db, intake, state, intent, profession_id=profession_id)
+        return sources_for_question(db, intake, state, intent, profession_id=profession_id,
+                                    case_vector=case_vector)
     ranked = sorted(matches, key=lambda match: match[0], reverse=True)
     hints, seen_details = [], set()
     for _, hint in ranked:

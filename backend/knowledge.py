@@ -7,6 +7,7 @@ from sqlalchemy import select
 from backend.db import KnowledgeCard
 from backend.vacancy_context import keywords, profession_for_question
 from backend.vacancy_parser import SKILL_PATTERN, canonical_skill, overlaps_task, task_key
+from backend.vectors import SIMILAR_MIN_SCORE
 
 
 SECTIONS = ("task", "context", "actions", "decisions", "verification", "errors", "limitations")
@@ -85,7 +86,7 @@ def prior_case_context(state, answer, previous_answers=()):
             if fact["field"] in {"context", "limitation"}][-3:]
 
 
-def published_context(db, interview, state, intent):
+def published_context(db, interview, state, intent, case_vector=None):
     if intent not in {"action", "decision", "verification", "context"}:
         return {}, {}
     profession = profession_for_question(db, interview.context, state, intent)
@@ -97,28 +98,30 @@ def published_context(db, interview, state, intent):
     )}
     if not current_skills:
         return {}, {}
-    candidates = db.scalars(published_cards().where(
+    candidates = list(db.scalars(published_cards().where(
         KnowledgeCard.origin == "human", KnowledgeCard.catalog_profession_id == profession,
         KnowledgeCard.owner_id != interview.owner_id, KnowledgeCard.session_id != interview.id,
-    ).order_by(KnowledgeCard.updated_at.desc(), KnowledgeCard.id).limit(24))
+    ).order_by(KnowledgeCard.updated_at.desc(), KnowledgeCard.id).limit(24)))
+    # Another person's case of the same kind of problem counts even when it shares no words with this one.
+    meaning = case_vector.case_scores(db, [card.id for card in candidates]) if case_vector else {}
     current_text = "\n".join(fact["text"] for fact in state["facts"])
     conditions_to_check = {label: pattern for label, pattern in CONDITIONS.items()
                            if not re.search(pattern, current_text, re.I)}
     matches, gap_skills, conditions = {}, set(), set()
     for card in candidates:
-        for case in cases_of(card.content):
+        for index, case in enumerate(cases_of(card.content)):
             if intent not in case.get("unknown_fields", ()):
                 continue
             case_skills = {skill for section in PRACTICE_SECTIONS for fact in case.get(section, ())
                            for skill in fact_skills(fact, section)}
             shared = case_skills & current_skills
-            if not shared or not any(
-                other.get("source", "interview") == "interview" and other.get("supporting_message_ids") and (
-                    len(keywords(task) & keywords(other["text"])) >= 2
-                    and overlaps_task(task_key(task), task_key(other["text"]))
-                )
-                for task in tasks for other in case.get("task", ())
-            ):
+            grounded = [other["text"] for other in case.get("task", ())
+                        if other.get("source", "interview") == "interview" and other.get("supporting_message_ids")]
+            similar = meaning.get((card.id, index), 0.0) >= SIMILAR_MIN_SCORE
+            if not shared or not grounded or (not similar and not any(
+                len(keywords(task) & keywords(other)) >= 2 and overlaps_task(task_key(task), task_key(other))
+                for task in tasks for other in grounded
+            )):
                 continue
             matches[card.id] = card.version
             gap_skills.update(shared)

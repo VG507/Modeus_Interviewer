@@ -52,6 +52,7 @@ export type PublicSummary = {
   author_name: string | null; reviewed_at: string;
 };
 export type PublicCard = PublicSummary & { content: CardContent; text: string };
+export type SearchPage = { items: (PublicSummary & { score: number })[]; mode: 'meaning' | 'words' };
 export type Page<T> = { items: T[]; next_cursor: string | null };
 
 const messages: Record<string, string> = {

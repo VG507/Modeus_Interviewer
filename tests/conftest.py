@@ -6,6 +6,12 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
 
+@pytest.fixture(autouse=True)
+def no_embedding_model(monkeypatch):
+    """Tests never reach the embedding model from .env; a test that needs one configures and fakes it."""
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "")
+
+
 @pytest.fixture
 def database_url(tmp_path):
     """A fresh empty database: SQLite by default, PostgreSQL when TEST_DATABASE_URL points to a server."""

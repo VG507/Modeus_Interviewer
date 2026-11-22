@@ -189,9 +189,34 @@ GitHub Trends сохраняет README и снимки звёзд для наб
 
 В учебных материалах можно кратко пересказать рабочую задачу и дать ссылку на первоисточник. Если нужен дословный фрагмент Issue, README или чужой пример кода, редактор перед публикацией проверяет лицензию именно этого материала и соблюдает условия использования, в том числе требования к атрибуции.
 
+## Эмбеддинги: поиск по смыслу и похожие случаи
+
+Векторы считает локальная модель bge-m3 в Ollama через OpenAI-совместимый `/v1/embeddings`. Однократная настройка:
+
+```bash
+ollama pull bge-m3
+```
+
+В `.env`: `EMBEDDING_BASE_URL=http://localhost:11434/v1` и `EMBEDDING_MODEL=bge-m3`. Пустой `EMBEDDING_BASE_URL` выключает эмбеддинги: каталог ищет по совпадению слов, интервью подбирает контекст как раньше.
+
+- Каталог: поле «Поиск по смыслу» (`GET /api/v1/catalog/search?q=`) и блок «Похожие случаи» на странице карточки (`GET /api/v1/catalog/{id}/similar`). Если модель не отвечает, поиск переключается на слова и возвращает `"mode": "words"`.
+- Интервью: перед вопросом считается вектор текущего случая (не дольше 5 секунд). Задача из вакансии подходит при близости от 0,55, чужой опубликованный случай — от 0,6, даже без общих слов. Навыки, подтверждение задачи ответом и прежние проверки по словам остаются.
+- Индексация: опубликованные карточки и задачи свежих вакансий векторизуются в фоне раз в 5 минут и сразу после публикации. Вектор пересчитывается, только если изменился текст или модель. Вручную: `python -m backend.cli embed-cards`.
+
+Пороги выбраны замером `scripts/evaluate_embeddings.py` на наборах из `data/embeddings/`: 30 карточек, 28 запросов другими словами, 11 карточек о той же проблеме от другого человека и 32 задачи из вакансий.
+
+| | по словам (было) | bge-m3 | nomic-embed-text |
+|---|---|---|---|
+| Поиск: нужная карточка первой | 15/28 | 23/28 | 8/28 |
+| Поиск: нужная карточка в тройке | 23/28 | 27/28 | 14/28 |
+| Похожий случай первым | 9/11 | 10/11 | 1/11 |
+| Подсказка из вакансии: верная / неверная | 16 / 1 из 41 | 25 / 1 из 41 | 26 / 15 из 41 |
+
+Вектор запроса bge-m3 считается за 20–40 мс. В базе: таблицы `card_embeddings` и `text_embeddings` (миграция `0022`); на PostgreSQL с pgvector поиск идёт в SQL, иначе в Python. `copy-database` эти таблицы не переносит: фоновая индексация пересчитает их сама.
+
 ## PostgreSQL
 
-Основная база — PostgreSQL 18 с расширением pgvector для будущих эмбеддингов. SQLite остаётся запасным вариантом: без `DATABASE_URL` backend и тесты работают на нём. Не использовать одну SQLite-БД с нескольких машин.
+Основная база — PostgreSQL 18 с расширением pgvector для эмбеддингов. SQLite остаётся запасным вариантом: без `DATABASE_URL` backend и тесты работают на нём. Не использовать одну SQLite-БД с нескольких машин.
 
 macOS (формула `postgresql@18` не попадает в PATH сама):
 
@@ -204,7 +229,7 @@ psql -d postgres -c "create database modeus owner modeus"
 psql -d modeus -c "create extension if not exists vector"
 ```
 
-Windows: `winget install PostgreSQL.PostgreSQL.18`, затем те же три команды `psql` через `psql -U postgres`. pgvector пока не обязателен: миграции его не используют.
+Windows: `winget install PostgreSQL.PostgreSQL.18`, затем те же три команды `psql` через `psql -U postgres`. pgvector не обязателен: без него векторы хранятся текстом и сравниваются в Python, как на SQLite.
 
 В `.env` укажите `DATABASE_URL=postgresql+psycopg://modeus:modeus@localhost/modeus` и выполните `alembic upgrade head`. Драйвер `psycopg` ставится из `requirements.lock`.
 
@@ -216,10 +241,10 @@ Windows: `winget install PostgreSQL.PostgreSQL.18`, затем те же три 
 
 Команда копирует все таблицы одной транзакцией и печатает число строк по каждой. Версии миграций обеих баз должны совпадать. Если в целевой базе уже есть пользователи, команда ничего не меняет. Перед переносом остановите backend.
 
-Тесты на PostgreSQL: каждый тест создаёт и удаляет свою базу, поэтому роли нужно право `createdb`. Без переменной тесты идут на SQLite.
+Тесты на PostgreSQL: каждый тест создаёт и удаляет свою базу, поэтому роли нужно право `createdb`. Без переменной тесты идут на SQLite. Чтобы в тестовых базах был pgvector, суперпользователь один раз выполняет `psql -d template1 -c "create extension if not exists vector"`: обычная роль создать расширение не может.
 
 ```powershell
 $env:TEST_DATABASE_URL="postgresql+psycopg://modeus:modeus@localhost/postgres"; .venv/Scripts/python.exe -m pytest -q
 ```
 
-Текущая вершина миграций — `0021`. Хранение описано в `backend/db.py`, вход — в `backend/auth.py` и `backend/security.py`. За цикл интервью отвечают `backend/interview_api.py`, `backend/interview_worker.py` и `backend/interview_engine.py`. Публикация и каталог находятся в `backend/card_api.py`, Telegram-бот — в `backend/telegram_bot.py`, код web — в `frontend/src`.
+Текущая вершина миграций — `0022`. Хранение описано в `backend/db.py`, вход — в `backend/auth.py` и `backend/security.py`. За цикл интервью отвечают `backend/interview_api.py`, `backend/interview_worker.py` и `backend/interview_engine.py`. Публикация и каталог находятся в `backend/card_api.py`, Telegram-бот — в `backend/telegram_bot.py`, код web — в `frontend/src`.

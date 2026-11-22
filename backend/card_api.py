@@ -19,6 +19,7 @@ from backend.interview_engine import GAPS_PREFIX, LABELS
 from backend.interview_schemas import FactField, Identifier, ShortText, VersionedRequest
 from backend.knowledge import SECTIONS, cases_of, fact_skills, published_cards
 from backend.pagination import newest_page
+from backend.themes import THEME_MIN_SCORE, catalog_themes
 
 router = APIRouter(prefix="/api/v1")
 MIN_REVIEW_ITEMS = 2
@@ -27,6 +28,7 @@ CardText = Annotated[str, StringConstraints(min_length=1, max_length=100_000)]
 Comment = Annotated[str, StringConstraints(strip_whitespace=True, max_length=4000)]
 AuthorName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
 SearchLimit = Annotated[int, Field(ge=1, le=20)]
+ThemeThreshold = Annotated[float, Field(ge=0.5, le=0.95)]
 SIMILAR_LIMIT = 3
 
 
@@ -153,6 +155,33 @@ class SearchHit(PublicSummary):
 class SearchPage(BaseModel):
     items: list[SearchHit]
     mode: Literal["meaning", "words"]
+
+
+class ThemeSkill(BaseModel):
+    skill: str
+    cases: int
+
+
+class ThemeCell(BaseModel):
+    phi: float
+    cases: int
+
+
+class Theme(BaseModel):
+    title: str
+    card_id: str
+    cases: int
+    cards: list[PublicSummary]
+    skills: list[ThemeSkill]
+    matrix: list[ThemeCell]
+
+
+class ThemesPage(BaseModel):
+    threshold: float
+    cases: int
+    unthemed: int
+    categories: list[str]
+    themes: list[Theme]
 
 
 Item = TypeVar("Item")
@@ -549,6 +578,18 @@ def search_catalog(request: Request, response: Response, q: ShortText, limit: Se
         hits, mode = search_cards(db, request.app.state.settings, q,
                                   published_cards().with_only_columns(KnowledgeCard.id), limit)
         return {"items": summaries(db, hits), "mode": mode}
+
+
+@router.get("/catalog/themes", response_model=ThemesPage)
+def catalog_theme_matrix(request: Request, response: Response, threshold: ThemeThreshold = THEME_MIN_SCORE):
+    response.headers["Cache-Control"] = "no-store"
+    with request.app.state.sessions() as db:
+        result = catalog_themes(db, request.app.state.settings.embedding_model, threshold)
+        cards = {hit.id: hit for hit in summaries(db, [(card_id, 1.0) for theme in result["themes"]
+                                                       for card_id in theme["card_ids"]])}
+        for theme in result["themes"]:
+            theme["cards"] = [cards[card_id] for card_id in theme.pop("card_ids") if card_id in cards]
+        return result
 
 
 @router.get("/catalog/{card_id}/similar", response_model=SearchPage)

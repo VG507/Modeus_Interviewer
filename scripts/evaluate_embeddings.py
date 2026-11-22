@@ -6,6 +6,7 @@ data/embeddings/catalog_search.json holds 30 cards and two tests:
   nearest card should be that original, among the 30 cards and the other twins.
 data/embeddings/vacancy_tasks.json holds vacancy duties labelled with the cases they
 fit; every case (card or twin) should get a fitting duty as its question hint, not a wrong one.
+Themes group the 41 cards; a twin should share a theme with its original, other pairs ideally not.
 
 For every model and card text variant the script reports how often the right card
 is first (hit@1) or in the top three (hit@3), the mean reciprocal rank, the score
@@ -27,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from backend.embeddings import EMBEDDED_SECTIONS, card_texts, embed, similarity, terms
 from backend.knowledge import SECTIONS
 from backend.settings import Settings
+from backend.themes import star_themes
 from backend import vacancy_context
 from backend.vacancy_context import duty_fits, duty_score, keywords, task_signals
 
@@ -75,6 +77,24 @@ def hint_report(name, hints, fits):
     right = sum(hint is not None and hint in fit for hint, fit in zip(hints, fits))
     wrong = sum(hint is not None and hint not in fit for hint, fit in zip(hints, fits))
     print(f"  {name:<26} right hint {right:>2}/{len(hints)}  wrong hint {wrong:>2}  no hint {len(hints) - right - wrong:>2}")
+
+
+def theme_report(vectors, threshold):
+    ids = sorted(vectors)
+    neighbours = {card: {} for card in ids}
+    for position, card in enumerate(ids):
+        for other in ids[position + 1:]:
+            if (score := similarity(vectors[card], vectors[other])) >= threshold:
+                neighbours[card][other] = neighbours[other][card] = score
+    themes = star_themes(neighbours)
+    theme_of = {member: leader for leader, members in themes for member in members}
+    twins = [card for card in ids if card.startswith("twin:")]
+    together = sum(theme_of.get(twin) is not None and theme_of.get(twin) == theme_of.get(twin[5:]) for twin in twins)
+    pairs = {frozenset((a, b)) for _, members in themes for i, a in enumerate(members) for b in members[i + 1:]}
+    # A pair is right only when it is a card and its own twin.
+    wrong = sorted(" ~ ".join(sorted(pair)) for pair in pairs if len({card.removeprefix("twin:") for card in pair}) > 1)
+    print(f"    themes >= {threshold:.2f}: {len(themes)} themes, twins with their original {together}/{len(twins)},"
+          f" other pairs in one theme {len(wrong)}" + (f": {', '.join(wrong[:6])}" if wrong else ""))
 
 
 def main():
@@ -130,6 +150,8 @@ def main():
                 duty_texts = [duty["text"] for duty in duties]
                 duty_vectors = embed(settings, [document_prefix + duty for duty in duty_texts])
                 case_vectors = embed(settings, [query_prefix + card_text(content, sections) for _, content in cases])
+                for threshold in (0.6, 0.62, 0.63, 0.64, 0.65, 0.7):
+                    theme_report(vectors, threshold)
                 shipped = vacancy_context.DUTY_MIN_SCORE
                 for threshold in THRESHOLDS[:4]:
                     vacancy_context.DUTY_MIN_SCORE = threshold

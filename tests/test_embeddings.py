@@ -30,6 +30,32 @@ def content(title, task, action, **extra):
             "decisions": [], "verification": [], "errors": [], "limitations": [], **extra}
 
 
+def publish(sessions, cards, drafts=()):
+    """{name: card id} for cards stored by one author; names in drafts stay unpublished."""
+    ids = {}
+    with sessions.begin() as db:
+        owner = User(email="author@example.test", password_hash="unused")
+        db.add(owner)
+        db.flush()
+        for name, card_content in cards.items():
+            interview = InterviewSession(owner_id=owner.id, topic_id="open-interview", context={}, status="completed")
+            db.add(interview)
+            db.flush()
+            published = name not in drafts
+            card = KnowledgeCard(
+                session_id=interview.id, owner_id=owner.id, origin="human", completion_version=1,
+                publication_status="published" if published else "draft",
+                review_status="reviewed" if published else "unreviewed",
+                consent={"content_version": 1} if published else None,
+                review={"content_version": 1, "decision": "accept", "at": "2026-11-22T10:00:00Z"} if published else None,
+                content=card_content, text="\n".join(fact["text"] for section in ("task", "actions")
+                                                     for fact in card_content[section]))
+            db.add(card)
+            db.flush()
+            ids[name] = card.id
+    return ids
+
+
 def test_card_texts_skip_the_multi_case_wrapper():
     card = {"title": "Карточка интервью", "cases": [
         content("Медленный отчёт", "Отчёт строился минуту.", "Добавил индекс."),
@@ -84,27 +110,7 @@ def test_published_cards_are_indexed_searched_and_linked(database_url, monkeypat
         "flaky": content("Нестабильные тесты", "Каждый пятый прогон падал.", "Заменил sleep на ожидания в Playwright."),
         "draft": content("Черновик про отчёт", "Отчёт тормозил.", "Добавил индекс."),
     }
-    ids = {}
-    with sessions.begin() as db:
-        owner = User(email="author@example.test", password_hash="unused")
-        db.add(owner)
-        db.flush()
-        for name, card_content in cards.items():
-            interview = InterviewSession(owner_id=owner.id, topic_id="open-interview", context={}, status="completed")
-            db.add(interview)
-            db.flush()
-            published = name != "draft"
-            card = KnowledgeCard(
-                session_id=interview.id, owner_id=owner.id, origin="human", completion_version=1,
-                publication_status="published" if published else "draft",
-                review_status="reviewed" if published else "unreviewed",
-                consent={"content_version": 1} if published else None,
-                review={"content_version": 1, "decision": "accept", "at": "2026-11-22T10:00:00Z"} if published else None,
-                content=card_content, text="\n".join(fact["text"] for section in ("task", "actions")
-                                                     for fact in card_content[section]))
-            db.add(card)
-            db.flush()
-            ids[name] = card.id
+    ids = publish(sessions, cards, drafts={"draft"})
 
     assert embeddings.index_cards(sessions, settings) == 3
     assert embeddings.index_cards(sessions, settings) == 0  # unchanged text and model are not embedded again
@@ -220,3 +226,37 @@ def test_text_vectors_are_cached_by_content(database_url, monkeypatch):
         assert set(scores) == {"Оптимизировать запросы", "Писать тесты"}
         assert scores["Оптимизировать запросы"] > 0.9 > scores["Писать тесты"]
     engine.dispose()
+
+
+def test_themes_group_close_cases_and_correlate_with_categories(database_url, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    command.upgrade(Config("alembic.ini"), "head")
+    settings = Settings(_env_file=None, database_url=database_url, hh_weekly_enabled=False,
+                        documentation_weekly_enabled=False, embedding_base_url="http://embeddings.test/v1",
+                        embedding_model="fake")
+    fake = lambda _, texts, timeout=None: [fake_vector(text) for text in texts]  # noqa: E731
+    monkeypatch.setattr(embeddings, "embed", fake)
+    monkeypatch.setattr(vectors, "embed", fake)
+    engine, sessions = database(database_url)
+    ids = publish(sessions, {
+        "report": content("Медленный отчёт PostgreSQL", "Отчёт строился 40 секунд.", "Добавил индекс."),
+        "query": content("Долгий запрос", "Запрос к PostgreSQL шёл минуту.", "Переписал запрос."),
+        "flaky": content("Нестабильные тесты", "Каждый пятый прогон падал.", "Заменил sleep на ожидания в Playwright."),
+        "regress": content("Долгий регресс", "Ручной прогон шёл три дня.", "Автоматизировал тесты на pytest."),
+        "tls": content("Истёк сертификат", "Сайт стал недоступен.", "Настроил автопродление TLS."),
+    })
+    assert embeddings.index_cards(sessions, settings) == 5
+    engine.dispose()
+    with TestClient(create_app(settings)) as client:
+        page = client.get("/api/v1/catalog/themes").json()
+        assert page["cases"] == 5 and page["unthemed"] == 1
+        themes = {frozenset(card["id"] for card in theme["cards"]): theme for theme in page["themes"]}
+        assert set(themes) == {frozenset({ids["report"], ids["query"]}), frozenset({ids["flaky"], ids["regress"]})}
+        reports = themes[frozenset({ids["report"], ids["query"]})]
+        assert reports["skills"] == [{"skill": "postgresql", "cases": 2}]
+        cell = dict(zip(page["categories"], reports["matrix"]))
+        # Both report cases name PostgreSQL and no other case does: a perfect correlation.
+        assert cell["databases"] == {"phi": 1.0, "cases": 2}
+        assert cell["testing"]["phi"] < 0
+        for outside in (0.1, 0.99):
+            assert client.get("/api/v1/catalog/themes", params={"threshold": outside}).status_code == 422

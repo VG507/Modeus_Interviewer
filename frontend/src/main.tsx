@@ -5,6 +5,7 @@ import { InterviewHome } from './InterviewHome';
 import { InterviewScreen } from './InterviewScreen';
 import { EditorData, type DataView } from './EditorData';
 import { CardsList, CardScreen, CatalogCard } from './Cards';
+import { Themes } from './Themes';
 import { ThemeToggle } from './ThemeToggle';
 import './style.css';
 
@@ -18,7 +19,8 @@ function App() {
   const [route, setRoute] = useState(() => window.location.hash);
   const interviewId = route.match(/^#\/interviews\/([a-zA-Z0-9_-]+)$/)?.[1];
   const cardId = route.match(/^#\/cards\/([a-zA-Z0-9_-]+)$/)?.[1];
-  const catalogId = route.match(/^#\/catalog\/([a-zA-Z0-9_-]+)$/)?.[1];
+  const themesView = route === '#/catalog/themes';
+  const catalogId = themesView ? undefined : route.match(/^#\/catalog\/([a-zA-Z0-9_-]+)$/)?.[1];
   const dataView: DataView | null = route === '#/data/sources' || route === '#/discovery' ? 'sources' :
     route === '#/data' || route === '#/data/vacancies' || route === '#/vacancies' ? 'vacancies' : null;
   const lock = useRef(false);
@@ -79,7 +81,7 @@ function App() {
         {user && <a href="#/cards">Мои карточки</a>}
         {user?.is_editor && <a href="#/review">Редактура</a>}
         {user?.is_editor && <a href="#/data" aria-current={dataView ? 'page' : undefined}>Данные</a>}
-        {!user && (route === '#/catalog' || catalogId) && <a href="#">Войти</a>}
+        {!user && (route === '#/catalog' || catalogId || themesView) && <a href="#">Войти</a>}
       </nav>
       <div className="masthead-side">
         {user && <div className="account"><span>{user.is_editor ? 'Доступ редактора' : 'Доступ участника'}</span>
@@ -87,7 +89,7 @@ function App() {
         <ThemeToggle/>
       </div>
     </header>
-    {catalogId ? <CatalogCard key={catalogId} id={catalogId}/> : route === '#/catalog' ?
+    {themesView ? <Themes/> : catalogId ? <CatalogCard key={catalogId} id={catalogId}/> : route === '#/catalog' ?
       <CardsList key="catalog" scope="catalog" onSessionExpired={expireSession}/> :
       loading ? <p role="status">Проверяем вход…</p> : !user ?
       <form className="panel login" onSubmit={login}>

@@ -1,15 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, ApiError, describe } from './api';
+import { api, ApiError, describe, skillCategories } from './api';
 
 const experiences = {
   noExperience: 'Без опыта', between1And3: '1–3 года', between3And6: '3–6 лет', moreThan6: 'Более 6 лет',
 };
 const levels = { junior: 'Junior', middle: 'Middle', senior: 'Senior', lead: 'Lead' };
 const sources = { hh: 'HH', trudvsem: 'Работа России', file: 'Импорт из файла' };
-const skillCategories: Record<string, string> = {
-  languages: 'Языки', backend: 'Бэкенд', frontend: 'Фронтенд', databases: 'Базы данных',
-  messaging: 'Очереди и брокеры', devops: 'DevOps', testing: 'Тестирование', tools: 'Инструменты', other: 'Другое',
-};
 const errors: Record<string, string> = {
   HH_NOT_CONFIGURED: 'Укажи параметры HH в .env и перезапусти сервер.',
   HH_ALREADY_RUNNING: 'Для этого профиля уже идёт сбор.',

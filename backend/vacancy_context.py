@@ -37,17 +37,19 @@ def task_signals(text):
 
 
 def duty_score(signals, task_words, case_words, duty, meaning=0.0):
-    """(shared signals, meaning, shared task words, shared case words) of a vacancy duty for the case.
+    """(shared signals, shared task words, shared case words, meaning) of a vacancy duty for the case.
 
     meaning is the embedding similarity of the case and the duty; it counts from DUTY_MIN_SCORE up.
+    Words rank first: on real interviews meaning-first put a generic React duty above the one about
+    slow page loads. Meaning breaks ties and lets a duty in when no words are shared.
     """
     words = keywords(duty)
-    return (len(signals & task_signals(duty)), meaning if meaning >= DUTY_MIN_SCORE else 0.0,
-            len(task_words & words), len(case_words & words))
+    return (len(signals & task_signals(duty)), len(task_words & words), len(case_words & words),
+            meaning if meaning >= DUTY_MIN_SCORE else 0.0)
 
 
 def duty_fits(score):
-    signal_overlap, meaning, _, case_overlap = score
+    signal_overlap, _, case_overlap, meaning = score
     return bool(signal_overlap or meaning or case_overlap >= 2)
 
 
@@ -106,7 +108,7 @@ def sources_for_question(db, intake, state, intent, *, profession_id=None, case_
         if not years_fit(intake.get("experience", ""), card["experience_band"]):
             continue
         matching_skills = sorted(case_skills.intersection(map(canonical_skill, card["skills"])))
-        task, source_field, score = "", "", (0, 0.0, 0, 0)
+        task, source_field, score = "", "", (0, 0, 0, 0.0)
         task_citations = {item["field_path"]: item for item in card.get("evidence", [])
                           if item["field_path"].startswith("tasks.")}
         for index, candidate in enumerate(card["tasks"]):

@@ -87,6 +87,7 @@ export function CardsList({ scope, onSessionExpired }: SessionProps & {
       <a href="#/review/published" aria-current={scope === 'published' ? 'page' : undefined}>Опубликованные</a>
     </nav> : null}
     <h1>{headings[scope]}</h1>
+    {isCatalog && <p><a href="#/catalog/themes">Темы и навыки →</a></p>}
     <section className="panel saved">
       {isCatalog && <form className="composer" role="search" onSubmit={event => {
         event.preventDefault();

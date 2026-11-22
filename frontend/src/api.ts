@@ -57,7 +57,10 @@ export type Theme = {
   skills: { skill: string; cases: number }[]; matrix: { phi: number; cases: number }[];
 };
 export type ThemesPage = { threshold: number; cases: number; unthemed: number; categories: string[]; themes: Theme[] };
-export type SearchPage = { items: (PublicSummary & { score: number })[]; mode: 'meaning' | 'words' };
+export type SearchMatch = { title: string; task: string; skills: string[] };
+export type SearchPage = {
+  items: (PublicSummary & { score: number; match?: SearchMatch | null })[]; mode: 'meaning' | 'words';
+};
 export type Page<T> = { items: T[]; next_cursor: string | null };
 
 const messages: Record<string, string> = {

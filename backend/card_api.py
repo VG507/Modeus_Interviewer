@@ -12,14 +12,17 @@ from sqlalchemy import func, select
 
 from backend.catalog_topics import catalog_topic_columns, profession_for_card
 from backend.db import CardEvent, KnowledgeCard, Message, now
-from backend.embeddings import SIMILAR_MIN_SCORE, configured as embeddings_configured, refresh_index, search_cards, similar_cards
+from backend.embeddings import (
+    SEARCH_POOL, SIMILAR_MIN_SCORE, configured as embeddings_configured, refresh_index, search_cards, similar_cards,
+)
 from backend.http_errors import MESSAGES
 from backend.interview_api import Actor, CommandKey, PageSize, utc, versioned_command
 from backend.interview_engine import GAPS_PREFIX, LABELS
 from backend.interview_schemas import FactField, Identifier, ShortText, VersionedRequest
 from backend.knowledge import SECTIONS, cases_of, fact_skills, published_cards
 from backend.pagination import newest_page
-from backend.themes import THEME_MIN_SCORE, catalog_themes
+from backend.taxonomy import TAXONOMY
+from backend.themes import THEME_MIN_SCORE, case_categories, catalog_themes, named_skills
 
 router = APIRouter(prefix="/api/v1")
 MIN_REVIEW_ITEMS = 2
@@ -148,8 +151,15 @@ class PublicCard(PublicSummary):
     text: str
 
 
+class SearchMatch(BaseModel):
+    title: str
+    task: str
+    skills: list[str]
+
+
 class SearchHit(PublicSummary):
     score: float
+    match: SearchMatch | None = None
 
 
 class SearchPage(BaseModel):
@@ -564,20 +574,40 @@ def catalog_topics(request: Request, response: Response):
         return {"items": list(db.scalars(query.with_only_columns(title).distinct().order_by(title)))}
 
 
+def case_match(content, index):
+    """The case a search hit matched (or the card's first case with facts), as shown under the hit."""
+    cases = list(cases_of(content))
+    case = cases[index] if index is not None and index < len(cases) else next(
+        (case for case in cases if case.get("task")), cases[0])
+    skills, _ = named_skills(case)
+    task = next((fact["text"] for fact in case.get("task") or ()), "")
+    return SearchMatch(title=case.get("title") or content["title"], task=task[:240], skills=sorted(skills)[:5])
+
+
 def summaries(db, hits):
-    """Public summaries of the scored card ids, in the order given."""
-    rows = {card.id: public_summary(card, title, profession) for card, _, title, profession in db.execute(
-        catalog_topic_columns(published_cards()).where(KnowledgeCard.id.in_([card_id for card_id, _ in hits])))}
-    return [SearchHit(**rows[card_id].model_dump(), score=round(score, 3)) for card_id, score in hits if card_id in rows]
+    """Public summaries of (card id, score[, matched case index]) hits, in the order given."""
+    rows = {card.id: (public_summary(card, title, profession), card.content)
+            for card, _, title, profession in db.execute(catalog_topic_columns(published_cards()).where(
+                KnowledgeCard.id.in_([hit[0] for hit in hits])))}
+    return [SearchHit(**rows[hit[0]][0].model_dump(), score=round(hit[1], 3),
+                      match=case_match(rows[hit[0]][1], hit[2]) if len(hit) > 2 else None)
+            for hit in hits if hit[0] in rows]
 
 
 @router.get("/catalog/search", response_model=SearchPage)
-def search_catalog(request: Request, response: Response, q: ShortText, limit: SearchLimit = 10):
+def search_catalog(request: Request, response: Response, q: ShortText, limit: SearchLimit = 10,
+                   category: Identifier | None = None):
     response.headers["Cache-Control"] = "no-store"
+    if category is not None and category not in TAXONOMY:
+        raise HTTPException(422, "UNKNOWN_CATEGORY")
     with request.app.state.sessions() as db:
         hits, mode = search_cards(db, request.app.state.settings, q,
-                                  published_cards().with_only_columns(KnowledgeCard.id), limit)
-        return {"items": summaries(db, hits), "mode": mode}
+                                  published_cards().with_only_columns(KnowledgeCard.id), SEARCH_POOL)
+        if category:
+            contents = dict(db.execute(select(KnowledgeCard.id, KnowledgeCard.content).where(
+                KnowledgeCard.id.in_([hit[0] for hit in hits]))).all())
+            hits = [hit for hit in hits if any(category in found for _, found in case_categories(contents[hit[0]]).values())]
+        return {"items": summaries(db, hits[:limit]), "mode": mode}
 
 
 @router.get("/catalog/themes", response_model=ThemesPage)

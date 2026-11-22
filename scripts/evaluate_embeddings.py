@@ -25,7 +25,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from backend.embeddings import EMBEDDED_SECTIONS, card_texts, embed, similarity, terms
+from backend.embeddings import (
+    EMBEDDED_SECTIONS, WORD_WEIGHT, card_texts, embed, search_passes, similarity, terms, word_share,
+)
 from backend.knowledge import SECTIONS
 from backend.settings import Settings
 from backend.themes import star_themes
@@ -141,6 +143,18 @@ def main():
                 scores = {card: similarity(vectors[own], vectors[card]) for card in ids if card != own}
                 similar.append((rank(scores, twin["of"]), scores[twin["of"]], [s for card, s in scores.items() if card != twin["of"]]))
             report(f"{variant} / search", [r for r, *_ in search])
+            if variant == "core":
+                # What the catalog ships: meaning plus WORD_WEIGHT per share of the query's words.
+                report("core / search + words", [rank({
+                    card: similarity(vector, vectors[card]) + WORD_WEIGHT * word_share(terms(query["text"]), pool[card])
+                    for card in ids if not card.startswith("twin:")}, query["relevant"][0])
+                    for query, vector in zip(queries, query_vectors)])
+                shown = [{card for card in ids if not card.startswith("twin:") and search_passes(
+                    similarity(vector, vectors[card]), word_share(terms(query["text"]), pool[card]))}
+                    for query, vector in zip(queries, query_vectors)]
+                kept = sum(query["relevant"][0] in found for query, found in zip(queries, shown))
+                noise = statistics.mean(len(found - set(query["relevant"])) for query, found in zip(queries, shown))
+                print(f"    shipped pass rule: right card kept {kept}/{len(queries)}, wrong cards shown {noise:.1f} on average")
             report(f"{variant} / similar", [r for r, *_ in similar])
             if variant == "core":
                 print("    search:")

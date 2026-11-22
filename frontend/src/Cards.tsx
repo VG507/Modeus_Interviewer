@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { api, ApiError, commandKeys, describe } from './api';
+import { api, ApiError, commandKeys, describe, skillCategories } from './api';
 import type {
   Card, CardContent, CardDetail, CardEvidence, CardFact, CardGap, Page, PublicCard, PublicSummary, SearchPage,
 } from './api';
@@ -28,6 +28,8 @@ export function CardsList({ scope, onSessionExpired }: SessionProps & {
   const [topicError, setTopicError] = useState('');
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState('');
+  const [category, setCategory] = useState('');
+  const [searchCategory, setSearchCategory] = useState('');
   const [found, setFound] = useState<SearchPage>();
   const [searchError, setSearchError] = useState('');
   const isCatalog = scope === 'catalog';
@@ -37,11 +39,13 @@ export function CardsList({ scope, onSessionExpired }: SessionProps & {
     const controller = new AbortController();
     setFound(undefined);
     setSearchError('');
-    api<SearchPage>('/catalog/search?' + new URLSearchParams({ q: search }), { signal: controller.signal })
+    const params = new URLSearchParams({ q: search });
+    if (searchCategory) params.set('category', searchCategory);
+    api<SearchPage>('/catalog/search?' + params, { signal: controller.signal })
       .then(page => { if (!controller.signal.aborted) setFound(page); })
       .catch(error => { if (!controller.signal.aborted) setSearchError(describe(error)); });
     return () => controller.abort();
-  }, [search]);
+  }, [search, searchCategory]);
 
   useEffect(() => {
     if (!isCatalog) return;
@@ -92,6 +96,7 @@ export function CardsList({ scope, onSessionExpired }: SessionProps & {
       {isCatalog && <form className="composer" role="search" onSubmit={event => {
         event.preventDefault();
         setSearch(query.trim());
+        setSearchCategory(category);
       }}>
         <label htmlFor="catalog-search">Поиск по смыслу</label>
         <div className="actions">
@@ -100,6 +105,14 @@ export function CardsList({ scope, onSessionExpired }: SessionProps & {
               setQuery(event.target.value);
               if (!event.target.value.trim()) setSearch('');
             }}/>
+          <select aria-label="Категория навыков" value={category} onChange={event => {
+            setCategory(event.target.value);
+            if (search) setSearchCategory(event.target.value);
+          }}>
+            <option value="">Все навыки</option>
+            {Object.entries(skillCategories).filter(([key]) => key !== 'other')
+              .map(([key, title]) => <option key={key} value={key}>{title}</option>)}
+          </select>
           <button>Найти</button>
         </div>
       </form>}
@@ -107,7 +120,9 @@ export function CardsList({ scope, onSessionExpired }: SessionProps & {
         {found?.mode === 'words' && <p className="meta">Поиск по смыслу сейчас недоступен, ищем по совпадению слов.</p>}
         {!!found?.items.length && <ul>{found.items.map(card => <li key={card.id}>
           <a href={`#/catalog/${card.id}`}>
-            {card.title}{card.topic_title !== card.title && <span>{card.topic_title}</span>}
+            {card.title}
+            {card.match && <span>{[card.match.title !== card.title && card.match.title, card.match.task,
+              card.match.skills.join(', ')].filter(Boolean).join(' · ')}</span>}
           </a>
         </li>)}</ul>}
         {found && !found.items.length && <p>Похожих карточек не нашлось.</p>}

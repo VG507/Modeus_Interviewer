@@ -68,6 +68,13 @@ def test_card_texts_skip_the_multi_case_wrapper():
     ]
 
 
+
+def test_weak_search_hits_need_a_shared_word():
+    assert embeddings.search_passes(0.56, 0.0)
+    assert embeddings.search_passes(0.52, 0.25)
+    assert not embeddings.search_passes(0.52, 0.0)  # an off-topic query near the line finds nothing
+    assert not embeddings.search_passes(0.49, 1.0)
+
 def test_embed_reads_openai_format_in_input_order(monkeypatch):
     seen = []
 
@@ -129,6 +136,17 @@ def test_published_cards_are_indexed_searched_and_linked(database_url, monkeypat
         assert [item["id"] for item in found["items"]][:2] in ([ids["report"], ids["query"]], [ids["query"], ids["report"]])
         assert ids["draft"] not in {item["id"] for item in found["items"]}
         assert ids["flaky"] not in {item["id"] for item in found["items"]}
+        report = next(item for item in found["items"] if item["id"] == ids["report"])
+        assert report["match"] == {"title": "Медленный отчёт", "task": "Отчёт по заказам строился 40 секунд.",
+                                   "skills": ["postgresql"]}
+
+        def search(**params):
+            return client.get("/api/v1/catalog/search", params={"q": "медленный запрос в отчёте", **params})
+
+        # Only the report card names a database skill; the edited query card no longer does.
+        assert [item["id"] for item in search(category="databases").json()["items"]] == [ids["report"]]
+        assert search(category="testing").json()["items"] == []
+        assert search(category="nonsense").status_code == 422
 
         similar = client.get(f"/api/v1/catalog/{ids['report']}/similar").json()["items"]
         assert [item["id"] for item in similar] == [ids["query"]]

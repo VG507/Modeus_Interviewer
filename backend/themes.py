@@ -65,14 +65,16 @@ def star_themes(neighbours):
     return themes
 
 
+def named_skills(case):
+    """(canonical skills, taxonomy categories) named in a case's title or facts."""
+    text = "\n".join([case.get("title", ""), *(fact["text"] for section in SECTIONS for fact in case.get(section) or ())])
+    skills = {skill for skill, _ in skill_hits(text)}
+    return skills, {SKILL_TAXONOMY[skill][0] for skill in skills if skill in SKILL_TAXONOMY}
+
+
 def case_categories(content):
-    """{case index: (canonical skills, taxonomy categories)} named in each case's title or facts."""
-    named = {}
-    for index, case in enumerate(cases_of(content)):
-        text = "\n".join([case.get("title", ""), *(fact["text"] for section in SECTIONS for fact in case.get(section) or ())])
-        skills = {skill for skill, _ in skill_hits(text)}
-        named[index] = skills, {SKILL_TAXONOMY[skill][0] for skill in skills if skill in SKILL_TAXONOMY}
-    return named
+    """{case index: (canonical skills, taxonomy categories)} for each case of a card."""
+    return {index: named_skills(case) for index, case in enumerate(cases_of(content))}
 
 
 def phi(both, theme_only, category_only, neither):

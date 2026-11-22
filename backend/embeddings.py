@@ -9,12 +9,12 @@ import asyncio
 import json
 import logging
 
-from sqlalchemy import Float, cast, delete, func, select, tuple_
+from sqlalchemy import Float, cast, delete, select, tuple_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import load_only
 
 from backend.db import CardEmbedding, KnowledgeCard, VacancyCollection, insert_for, now
-from backend.knowledge import cases_of, published_cards
+from backend.knowledge import SECTIONS, cases_of, published_cards
 from backend.vacancy_context import keywords
 from backend.vacancy_parser import skill_hits
 from backend.vacancy_samples import fresh_vacancy_samples, trudvsem_samples
@@ -31,6 +31,16 @@ CASE_VECTOR_TIMEOUT_SECONDS = 5
 # Lowest similarity of a search hit, measured for bge-m3 with scripts/evaluate_embeddings.py:
 # the right card stays for 26/28 queries with ~2 wrong cards above the line.
 SEARCH_MIN_SCORE = 0.5
+# Below this a hit must also share a word with the query, so an off-topic query ("облёт БПЛА" with no such
+# card) finds nothing instead of a stray card at 0.52. Wrong cards shown fall from 2.3 to 0.7 per query;
+# the cost is 2 of 28 right cards that matched by meaning alone (an English query, "интерфейс лагает").
+SEARCH_SURE_SCORE = 0.55
+# Hits rank by meaning plus this much per share of the query's words a card names: hit@1 23 -> 24
+# of 28 and MRR 0.89 -> 0.91 on the same queries; 0.15 and up loses the gain.
+WORD_WEIGHT = 0.1
+# Cases ranked by meaning before words rerank them, and how many cases a card may take in a ranking.
+SEARCH_POOL = 50
+CASES_PER_CARD = 5
 FACT_SECTIONS = {"task": "task", "action": "actions", "decision": "decisions"}
 
 
@@ -114,20 +124,31 @@ def index_vacancy_duties(sessions, settings):
     return cache_texts(sessions, settings, duties)
 
 
-def nearest(db, model, vector, candidates, limit):
-    """[(card id, score)] of the cards among candidates (a select of ids) closest to vector, best case per card."""
-    query = select(CardEmbedding.card_id).where(CardEmbedding.model == model, CardEmbedding.card_id.in_(candidates))
+def nearest_cases(db, model, vector, candidates, limit):
+    """[(card id, case index, score)] of the cases of candidate cards (a select of ids) closest to vector."""
+    query = select(CardEmbedding.card_id, CardEmbedding.case_index).where(
+        CardEmbedding.model == model, CardEmbedding.card_id.in_(candidates))
     if pgvector_column(db):
         distance = CardEmbedding.embedding.op("<=>", return_type=Float)(cast(json.dumps(vector), Vector()))
-        score = func.max(1 - distance)
-        return [tuple(row) for row in db.execute(
-            query.add_columns(score).group_by(CardEmbedding.card_id).order_by(score.desc(), CardEmbedding.card_id)
-            .limit(limit)
-        )]
+        return [tuple(row) for row in db.execute(query.add_columns(1 - distance).order_by(
+            distance, CardEmbedding.card_id, CardEmbedding.case_index).limit(limit))]
+    scored = [(card_id, index, similarity(vector, json.loads(stored)))
+              for card_id, index, stored in db.execute(query.add_columns(CardEmbedding.embedding))]
+    return sorted(scored, key=lambda item: (-item[2], item[0], item[1]))[:limit]
+
+
+def best_per_card(cases):
+    """{card id: (score, case index)} of each card's first, so closest, case in a ranked case list."""
     best = {}
-    for card_id, stored in db.execute(query.add_columns(CardEmbedding.embedding)):
-        best[card_id] = max(best.get(card_id, -1.0), similarity(vector, json.loads(stored)))
-    return sorted(best.items(), key=lambda item: (-item[1], item[0]))[:limit]
+    for card_id, index, score in cases:
+        best.setdefault(card_id, (score, index))
+    return best
+
+
+def nearest(db, model, vector, candidates, limit):
+    """[(card id, score)] of the cards closest to vector, best case per card."""
+    best = best_per_card(nearest_cases(db, model, vector, candidates, limit * CASES_PER_CARD))
+    return sorted(((card_id, score) for card_id, (score, _) in best.items()), key=lambda item: (-item[1], item[0]))[:limit]
 
 
 def similar_cards(db, model, card_id, candidates, limit):
@@ -146,26 +167,42 @@ def terms(text):
     return keywords(text) | {skill for skill, _ in skill_hits(text)}
 
 
-def word_matches(db, query, candidates, limit):
-    wanted = terms(query)
-    scored = []
-    for card_id, body in db.execute(select(KnowledgeCard.id, KnowledgeCard.text).where(KnowledgeCard.id.in_(candidates))):
-        if overlap := len(wanted & terms(body)):
-            scored.append((card_id, overlap / len(wanted)))
-    return sorted(scored, key=lambda item: (-item[1], item[0]))[:limit]
+def word_share(wanted, content):
+    """Share of the query's terms that a card names anywhere in its cases."""
+    if not wanted:
+        return 0.0
+    return len(wanted & terms("\n".join(body for _, body in card_texts(content, SECTIONS)))) / len(wanted)
+
+
+def search_passes(score, share):
+    """Whether a card with this similarity and share of the query's words is a search hit."""
+    return score >= SEARCH_SURE_SCORE or (score >= SEARCH_MIN_SCORE and share > 0)
 
 
 def search_cards(db, settings, query, candidates, limit):
-    """([(card id, score)], mode): by meaning, or by words while the embedding model is unavailable."""
+    """([(card id, score, case index)], mode), best first.
+
+    By meaning, reranked by shared words, among the cards search_passes lets through; the case index
+    names the case that matched. While the embedding model is unavailable, by words alone with no case index.
+    """
+    wanted = terms(query)
     if configured(settings):
         try:
             vector = embed(settings, [query])[0]
         except RuntimeError as exc:
             logger.warning("Search falls back to words: %s", exc)
         else:
-            return [(card_id, score) for card_id, score in nearest(db, settings.embedding_model, vector, candidates, limit)
-                    if score >= SEARCH_MIN_SCORE], "meaning"
-    return word_matches(db, query, candidates, limit), "words"
+            best = {card_id: hit for card_id, hit in best_per_card(nearest_cases(
+                db, settings.embedding_model, vector, candidates, SEARCH_POOL)).items() if hit[0] >= SEARCH_MIN_SCORE}
+            contents = dict(db.execute(select(KnowledgeCard.id, KnowledgeCard.content).where(KnowledgeCard.id.in_(best))).all())
+            shares = {card_id: word_share(wanted, content) for card_id, content in contents.items()}
+            ranked = [(card_id, score + WORD_WEIGHT * shares[card_id], index)
+                      for card_id, (score, index) in best.items() if search_passes(score, shares[card_id])]
+            return sorted(ranked, key=lambda item: (-item[1], item[0]))[:limit], "meaning"
+    scored = [(card_id, share, None) for card_id, content in db.execute(
+        select(KnowledgeCard.id, KnowledgeCard.content).where(KnowledgeCard.id.in_(candidates)))
+              if (share := word_share(wanted, content))]
+    return sorted(scored, key=lambda item: (-item[1], item[0]))[:limit], "words"
 
 
 def refresh_index(sessions, settings, card_ids=None):

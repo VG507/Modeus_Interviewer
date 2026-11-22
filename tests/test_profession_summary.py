@@ -106,7 +106,8 @@ def test_summary_counts_evidence_and_scores_from_data(monkeypatch, tmp_path):
     path = tmp_path / "summary.xlsx"
     profession_summary.write_workbook(summary, path)
     book = load_workbook(path)
-    assert book.sheetnames == ["Сводка", "Навыки", "Доказательства", "Источники и методика"]
+    assert book.sheetnames == ["Сводка", "Навыки", "Граф пересечений", "Доказательства", "Источники и методика",
+                               "graph_data"]
     assert book["Сводка"]["A2"].value.startswith("ДЕМО-ДАННЫЕ")
     assert book["Сводка"].cell(row=6, column=2).value == "Оптимизация баз данных"
     assert book["Навыки"].cell(row=4, column=2).value == "Python"
@@ -210,3 +211,28 @@ def test_editor_downloads_a_report_for_a_period(database_url, monkeypatch, tmp_p
     # The May vacancy is outside the period: only the November one supports the second competency.
     evidence = [sheet.cell(row=row, column=7).value for row in (6, 7)]
     assert any("Вакансии: 1 из 3 (33%) — HH 1" in text for text in evidence)
+
+
+def test_trend_needs_two_weeks_and_counts_an_old_label_once():
+    def sample(day, counts):
+        return {"collected_at": day, "source": "hh", "vacancies": 50, "skill_counts": counts}
+
+    same_day = {"snapshots": [sample("2026-11-20", {"rest": 27, "rest api": 8}), sample("2026-11-20", {"rest": 28})]}
+    assert profession_summary.trend_of(same_day) == ({}, None)
+    # Before normalization one skill was counted under two labels; the smaller count must not win.
+    weeks = {"snapshots": [sample("2026-11-01", {"rest": 27, "rest api": 8}), sample("2026-11-20", {"rest": 28})]}
+    trends, since = profession_summary.trend_of(weeks)
+    assert since == "2026-11-01" and trends["rest"] == pytest.approx(0.02)
+
+
+def test_wordings_drop_bullets_and_headings_and_every_vacancy_is_sent():
+    data = {"vacancies": [
+        vacancy(1, "hh", "2026-11-10", [], ["1. Работа с требованиями:", "- Разработка API;", "Код-ревью"]),
+        vacancy(2, "hh", "2026-11-10", [], ["Разработка API", "Код-ревью"]),
+        vacancy(3, "hh", "2026-11-10", [], ["Миграции данных"]),
+    ]}
+    items = profession_summary.vacancy_statements(data)
+    assert [(item["text"], sorted(item["vacancies"])) for item in items] == [
+        ("Код-ревью", ["v1", "v2"]), ("Разработка API", ["v1", "v2"]), ("Миграции данных", ["v3"])]
+    # The limit keeps the only wording of the third vacancy rather than the second frequent one.
+    assert [item["text"] for item in profession_summary.representative(items, 2)] == ["Код-ревью", "Миграции данных"]

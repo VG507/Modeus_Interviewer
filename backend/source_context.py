@@ -21,6 +21,15 @@ SOURCE_PURPOSES = {
     "context": ("behavior", "implementation", "effect"),
 }
 PREFERRED_KIND = {"behavior": "documentation", "effect": "research", "implementation": "engineering"}
+# Per-profession preference (0..1) for an excerpt kind: breaks ties between equally relevant excerpts.
+KIND_WEIGHTS = {
+    "python_backend": {"documentation": 1.0, "engineering": 0.8, "discussion": 0.4, "research": 0.2},
+    "frontend": {"documentation": 1.0, "engineering": 0.8, "discussion": 0.5, "research": 0.2},
+    "qa": {"documentation": 1.0, "engineering": 0.8, "discussion": 0.4, "research": 0.4},
+    "devops": {"documentation": 1.0, "engineering": 0.9, "discussion": 0.4, "research": 0.2},
+    "ml_engineer": {"research": 1.0, "documentation": 0.8, "engineering": 0.7, "discussion": 0.3},
+}
+DEFAULT_KIND_WEIGHT = 0.5
 VERSION_PATTERN = r"\d+(?:\.\d+){0,3}"
 ExcerptText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 
@@ -117,6 +126,7 @@ def sources_for_followup(db, intake, state, intent, answer_text="", case_vector=
                       if len(task_words & keywords(project.get("task", ""))) >= 2]
     environment = normalize("\n".join([case_text, *project_stacks]))
     purposes = SOURCE_PURPOSES[intent]
+    kind_weights = KIND_WEIGHTS.get(profession_id, {})
     matches = []
     subscribed = select(DocumentationSubscription.watch_id).where(
         DocumentationSubscription.profession_id == profession_id,
@@ -150,7 +160,8 @@ def sources_for_followup(db, intake, state, intent, answer_text="", case_vector=
         if re.search(phrase_pattern(excerpt.detail), case) or re.search(phrase_pattern(excerpt.quote), case):
             continue
         score = (-purposes.index(excerpt.purpose), excerpt.kind == PREFERRED_KIND[excerpt.purpose],
-                 len(shared_signals), len(shared_words), bool(excerpt.version), len(excerpt.conditions), dated)
+                 len(shared_signals), len(shared_words), kind_weights.get(excerpt.kind, DEFAULT_KIND_WEIGHT),
+                 bool(excerpt.version), len(excerpt.conditions), dated)
         matches.append((score, {
             "source_id": excerpt.source_id, "excerpt_id": excerpt.id, "profession_id": profession_id,
             "kind": excerpt.kind, "purpose": excerpt.purpose, "title": excerpt.title, "url": url,

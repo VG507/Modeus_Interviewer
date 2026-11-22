@@ -128,7 +128,7 @@ def index_vacancy_duties(sessions, settings):
 
 
 def nearest_cases_statement(model, vector, candidates, limit):
-    """The pgvector query for nearest_cases, shaped so the HNSW index of migration 0026 can serve it.
+    """The pgvector query for nearest_cases, shaped so the HNSW index of migration 0027 can serve it.
 
     The index covers `embedding::vector(N)` where `model = '<model>'`, so the query casts the same
     way and names the model as a literal: a bound value would hide the match from a generic plan.

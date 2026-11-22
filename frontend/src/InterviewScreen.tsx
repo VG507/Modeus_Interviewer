@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError, commandKeys, describe, processingError, type AnswerResult,
   type Card, type Detail, type Interview } from './api';
+import { Dictation } from './Dictation';
 
 const stageLabels = {
   initial_question: 'Готовим первый вопрос',
@@ -193,6 +194,10 @@ export function InterviewScreen({ id, onSessionExpired }: { id: string; onSessio
         <label htmlFor="reply">Ваш ответ</label>
         <textarea id="reply" rows={5} required maxLength={8000} value={text} disabled={!!busy}
           onChange={event => setEditor({ question: currentQuestion.id, text: event.target.value })}/>
+        <Dictation key={currentQuestion.id} disabled={!!busy || !!loadError} onText={spoken => setEditor(previous => {
+          const current = previous && previous.question === currentQuestion.id ? previous.text : text;
+          return { question: currentQuestion.id, text: (current.trimEnd() + ' ' + spoken).trim().slice(0, 8000) };
+        })}/>
         <div className="actions">
           <button disabled={!!busy || !!loadError || !text.trim()}>Отправить ответ</button>
           <button type="button" className="secondary" disabled={!!busy || !!loadError || !text.trim() || !unsaved}

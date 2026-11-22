@@ -267,3 +267,7 @@ html[data-theme="dark"] .heat td.strong { color: var(--text-strong); }
   width: 160px; height: 10px; border-radius: 4px;
   background: linear-gradient(to right, var(--corr-less), var(--corr-none), var(--corr-more));
 }
+
+.dictation { display: grid; gap: 6px; justify-items: start; margin-top: 10px; }
+.dictation p { margin: 0; }
+.dictation span { display: block; font-size: .8rem; }

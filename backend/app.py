@@ -20,6 +20,7 @@ from backend.http_errors import LimitRequestBody, error_response, unhandled_erro
 from backend.interview_api import router as interview_router
 from backend.interview_worker import run_worker
 from backend.maintenance import schedule_pruning
+from backend.max_bot import run_max_bot
 from backend.security import check_password, hash_password, token_hash
 from backend.settings import Settings
 from backend.telegram_bot import run_bot
@@ -49,6 +50,8 @@ def create_app(settings: Settings | None = None):
             workers.append(asyncio.create_task(schedule_card_index(sessions, settings)))
         if settings.telegram_bot_token:
             workers.append(asyncio.create_task(run_bot(app, settings)))
+        if settings.max_bot_token.strip():
+            workers.append(asyncio.create_task(run_max_bot(app, settings)))
         try:
             yield
         finally:

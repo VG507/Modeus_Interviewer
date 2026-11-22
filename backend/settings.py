@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     telegram_bot_token: str = Field(default="", repr=False)
     telegram_api_url: str = "https://api.telegram.org"
     telegram_open_signup: bool = False
+    max_bot_token: str = Field(default="", repr=False)
+    max_ca_file: str = ""
 
     @field_validator("llm_temperature", "llm_seed", mode="before")
     @classmethod

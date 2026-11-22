@@ -101,7 +101,7 @@ LAYOUT = str.maketrans(
 
 @dataclass(frozen=True)
 class Account:
-    telegram_id: int
+    external_id: int
     user_id: str
     chat_id: int
     state: dict
@@ -148,18 +148,19 @@ def invite_link(settings, code):
     return f"https://t.me/{username}?start={code}"
 
 
-def link_account(sessions, telegram_id, chat_id, code, open_signup):
+def link_account(sessions, telegram_id, chat_id, code, open_signup, *, account_model=TelegramAccount):
     """Link the chat by invite, by an earlier link or by open sign-up; return (user_id, invite status)."""
     with sessions.begin() as db:
-        account = db.get(TelegramAccount, telegram_id)
-        invite = db.get(TelegramInvite, token_hash(code)) if code else None
         status = "invalid" if code else None
-        if invite is not None:
-            db.delete(invite)
-            if invite.expires_at > now():
+        if code:
+            invite_user = db.scalar(delete(TelegramInvite).where(
+                TelegramInvite.code_hash == token_hash(code), TelegramInvite.expires_at > now(),
+            ).returning(TelegramInvite.user_id))
+            if invite_user is not None:
                 status = "used"
+        account = db.get(account_model, telegram_id)
         if status == "used":
-            user_id = invite.user_id
+            user_id = invite_user
         elif account is not None:
             account.chat_id = chat_id
             return account.user_id, status
@@ -173,10 +174,10 @@ def link_account(sessions, telegram_id, chat_id, code, open_signup):
                 user_id = user.id
         else:
             return None, status
-        db.execute(delete(TelegramAccount).where(TelegramAccount.user_id == user_id,
-                                                 TelegramAccount.telegram_id != telegram_id))
+        db.execute(delete(account_model).where(account_model.user_id == user_id,
+                                               account_model.external_id != telegram_id))
         if account is None:
-            db.add(TelegramAccount(telegram_id=telegram_id, user_id=user_id, chat_id=chat_id, state={}))
+            db.add(account_model(external_id=telegram_id, user_id=user_id, chat_id=chat_id, state={}))
         elif account.user_id != user_id:
             account.user_id, account.chat_id, account.state = user_id, chat_id, {}
         else:
@@ -184,18 +185,18 @@ def link_account(sessions, telegram_id, chat_id, code, open_signup):
         return user_id, status
 
 
-def load_account(sessions, telegram_id):
+def load_account(sessions, telegram_id, *, account_model=TelegramAccount):
     with sessions() as db:
-        account = db.get(TelegramAccount, telegram_id)
+        account = db.get(account_model, telegram_id)
         if account is None:
             return None
-        return Account(account.telegram_id, account.user_id, account.chat_id, dict(account.state))
+        return Account(account.external_id, account.user_id, account.chat_id, dict(account.state))
 
 
-def save_state(sessions, telegram_id, changes, interview_id=None):
+def save_state(sessions, telegram_id, changes, interview_id=None, *, account_model=TelegramAccount):
     """Merge state changes; with interview_id, only while that interview is still open in the chat."""
     with sessions.begin() as db:
-        account = db.get(TelegramAccount, telegram_id)
+        account = db.get(account_model, telegram_id)
         if account is None or (interview_id and account.state.get("interview_id") != interview_id):
             return False
         account.state = {**account.state, **changes}
@@ -253,9 +254,9 @@ def professions(sessions):
         return catalog_profiles(db)
 
 
-def followed_accounts(sessions):
+def followed_accounts(sessions, *, account_model=TelegramAccount):
     with sessions() as db:
-        return [account.telegram_id for account in db.scalars(select(TelegramAccount))
+        return [account.external_id for account in db.scalars(select(account_model))
                 if account.state.get("interview_id")]
 
 
@@ -302,11 +303,15 @@ def require_question(detail):
 
 
 class TelegramBot:
-    def __init__(self, app, settings, *, telegram_transport=None):
+    account_model = TelegramAccount
+    channel = "Telegram"
+    no_access = NO_ACCESS
+
+    def __init__(self, app, settings, *, telegram_transport=None, client=None):
         self.sessions = app.state.sessions
         self.settings = settings
         self.origin = app.state.app_origin
-        self.telegram = httpx.AsyncClient(
+        self.client = client or httpx.AsyncClient(
             base_url=f"{settings.telegram_api_url.rstrip('/')}/bot{settings.telegram_bot_token}/",
             timeout=httpx.Timeout(15, read=40), transport=telegram_transport)
         self.api = httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
@@ -325,7 +330,7 @@ class TelegramBot:
         for task in list(self.tasks):
             task.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
-        await self.telegram.aclose()
+        await self.client.aclose()
         await self.api.aclose()
 
     def spawn(self, coroutine):
@@ -344,7 +349,7 @@ class TelegramBot:
 
     async def call(self, method, **params):
         for attempt in range(2):
-            response = await self.telegram.post(method, json=params)
+            response = await self.client.post(method, json=params)
             try:
                 data = response.json()
             except ValueError:
@@ -363,10 +368,10 @@ class TelegramBot:
         try:
             return await self.call(method, **params)
         except TelegramError as exc:
-            logger.warning("Telegram %s failed: %s %s", method, exc.status, exc)
+            logger.warning("%s %s failed: %s", self.channel, method, exc.status)
         except httpx.HTTPError as exc:
             # The request URL contains the bot token.
-            logger.warning("Telegram %s failed: %s", method, type(exc).__name__)
+            logger.warning("%s %s failed: %s", self.channel, method, type(exc).__name__)
         return None
 
     async def send(self, chat_id, text, buttons=None):
@@ -411,7 +416,7 @@ class TelegramBot:
                     raise
 
     async def set_state(self, account, **changes):
-        await asyncio.to_thread(save_state, self.sessions, account.telegram_id, changes)
+        await asyncio.to_thread(save_state, self.sessions, account.external_id, changes, account_model=self.account_model)
         return replace(account, state={**account.state, **changes})
 
     async def run(self):
@@ -468,7 +473,7 @@ class TelegramBot:
         except (Notice, ApiFailure) as exc:
             await self.send(chat_id, escape(str(exc)))
         except Exception:
-            logger.exception("Telegram update failed")
+            logger.exception("%s update failed", self.channel)
             await self.send(chat_id, "Что-то пошло не так. Попробуйте ещё раз.")
 
     async def handle(self, telegram_id, chat_id, message, query):
@@ -479,9 +484,9 @@ class TelegramBot:
         command = command.split("@")[0].lower()
         if command == "/start":
             return await self.start(telegram_id, chat_id, argument.strip()[:64])
-        account = await asyncio.to_thread(load_account, self.sessions, telegram_id)
+        account = await asyncio.to_thread(load_account, self.sessions, telegram_id, account_model=self.account_model)
         if account is None:
-            return await self.send(chat_id, NO_ACCESS)
+            return await self.send(chat_id, self.no_access)
         if query:
             await self.flush(account)
             return await self.on_button(account, query)
@@ -515,12 +520,13 @@ class TelegramBot:
 
     async def start(self, telegram_id, chat_id, code):
         user_id, invite = await asyncio.to_thread(
-            link_account, self.sessions, telegram_id, chat_id, code, self.settings.telegram_open_signup)
+            link_account, self.sessions, telegram_id, chat_id, code,
+            self.account_model is TelegramAccount and self.settings.telegram_open_signup, account_model=self.account_model)
         if invite == "invalid":
             await self.send(chat_id, "Ссылка-приглашение недействительна или устарела.")
         if user_id is None:
-            return await self.send(chat_id, NO_ACCESS)
-        greeting = "Telegram связан с вашим аккаунтом Modeus." if invite == "used" else "Здравствуйте!"
+            return await self.send(chat_id, self.no_access)
+        greeting = f"{self.channel} связан с вашим аккаунтом Modeus." if invite == "used" else "Здравствуйте!"
         await self.send(chat_id, f"{greeting}\n\n{escape(HELP)}", [[("Начать интервью", "new")]])
 
     async def on_command(self, account, command):
@@ -584,25 +590,25 @@ class TelegramBot:
 
     def buffer(self, account, text):
         # Telegram splits long messages; join parts that arrive together into one answer.
-        self.buffers.setdefault(account.telegram_id, []).append(text)
-        timer = self.flushers.get(account.telegram_id)
+        self.buffers.setdefault(account.external_id, []).append(text)
+        timer = self.flushers.get(account.external_id)
         if timer:
             timer.cancel()
-        self.flushers[account.telegram_id] = self.spawn(self.flush_later(account.telegram_id, account.chat_id))
+        self.flushers[account.external_id] = self.spawn(self.flush_later(account.external_id, account.chat_id))
 
     async def flush_later(self, telegram_id, chat_id):
         await asyncio.sleep(self.answer_delay)
         async with self.lock(telegram_id):
-            account = await asyncio.to_thread(load_account, self.sessions, telegram_id)
+            account = await asyncio.to_thread(load_account, self.sessions, telegram_id, account_model=self.account_model)
             if account is not None:
                 await self.guarded(chat_id, self.flush(account))
 
     async def flush(self, account):
         """Submit buffered answer parts; the caller holds the participant's lock."""
-        timer = self.flushers.pop(account.telegram_id, None)
+        timer = self.flushers.pop(account.external_id, None)
         if timer is not None and timer is not asyncio.current_task():
             timer.cancel()
-        parts = self.buffers.pop(account.telegram_id, None)
+        parts = self.buffers.pop(account.external_id, None)
         if parts:
             await self.submit_answer(account, "\n".join(parts))
 
@@ -637,7 +643,7 @@ class TelegramBot:
             except ApiFailure as exc:
                 if exc.code != "VERSION_CONFLICT" or attempt:
                     raise
-        self.follow(account.telegram_id)
+        self.follow(account.external_id)
 
     async def new_interview(self, account):
         profile = await self.request(account.user_id, "GET", "/interview-profile")
@@ -697,7 +703,7 @@ class TelegramBot:
         await self.send(account.chat_id, "Интервью началось. Отвечайте на вопросы обычными сообщениями, "
                                          "подробно, как рассказали бы коллеге. Под вопросом есть кнопки "
                                          "«Пропустить» и «Завершить интервью».")
-        self.follow(account.telegram_id)
+        self.follow(account.external_id)
 
     async def skip(self, account, question_id=None):
         path = self.interview_path(account)
@@ -708,7 +714,7 @@ class TelegramBot:
                 raise Notice("Этот вопрос уже неактуален.")
 
         await self.versioned(account.user_id, path, "skip", check=check)
-        self.follow(account.telegram_id)
+        self.follow(account.external_id)
 
     async def confirm_finish(self, account, interview_id):
         self.interview_path(account, interview_id)
@@ -722,7 +728,7 @@ class TelegramBot:
                 raise Notice("Интервью уже завершено.")
 
         await self.versioned(account.user_id, self.interview_path(account, interview_id), "finish", check=check)
-        self.follow(account.telegram_id)
+        self.follow(account.external_id)
 
     async def retry(self, account, interview_id):
         def check(detail):
@@ -730,7 +736,7 @@ class TelegramBot:
                 raise Notice("Обработка уже продолжается.")
 
         await self.versioned(account.user_id, self.interview_path(account, interview_id), "retry", check=check)
-        self.follow(account.telegram_id)
+        self.follow(account.external_id)
 
     async def list_interviews(self, account):
         page = await self.request(account.user_id, "GET", "/interviews?limit=10")
@@ -753,7 +759,7 @@ class TelegramBot:
         title = escape(detail["current_topic_title"] or "Интервью")
         await self.send(account.chat_id, f"<b>{title}</b> · {STATUSES[detail['status']]}")
         if processing(detail):
-            self.follow(account.telegram_id)
+            self.follow(account.external_id)
         elif detail["processing_status"] == "failed":
             await self.send_failure(account, detail)
         elif detail["card_id"]:
@@ -781,7 +787,7 @@ class TelegramBot:
         chat_id = status = label = None
         try:
             while True:
-                account = await asyncio.to_thread(load_account, self.sessions, telegram_id)
+                account = await asyncio.to_thread(load_account, self.sessions, telegram_id, account_model=self.account_model)
                 interview_id = account and account.state.get("interview_id")
                 if not interview_id:
                     return
@@ -810,7 +816,7 @@ class TelegramBot:
         except ApiFailure as exc:
             await self.send(chat_id, escape(str(exc)))
         except Exception:
-            logger.exception("Telegram follower failed")
+            logger.exception("%s follower failed", self.channel)
         finally:
             if status:
                 await self.quietly("deleteMessage", chat_id=chat_id, message_id=status["message_id"])
@@ -830,8 +836,8 @@ class TelegramBot:
                 await self.send(account.chat_id, f"<i>{escape(item['text'])}</i>")
             elif item["kind"] == "question" and item["id"] == detail["current_question_id"]:
                 await self.send_question(account, detail, item)
-        await asyncio.to_thread(save_state, self.sessions, account.telegram_id,
-                                {"seen": fresh[-1]["sequence"]}, detail["id"])
+        await asyncio.to_thread(save_state, self.sessions, account.external_id,
+                                {"seen": fresh[-1]["sequence"]}, detail["id"], account_model=self.account_model)
 
     async def send_question(self, account, detail, question):
         text = escape(question["text"])
@@ -846,8 +852,8 @@ class TelegramBot:
     async def send_failure(self, account, detail, repeat=True):
         if not repeat and account.state.get("failed_version") == detail["version"]:
             return
-        await asyncio.to_thread(save_state, self.sessions, account.telegram_id,
-                                {"failed_version": detail["version"]}, detail["id"])
+        await asyncio.to_thread(save_state, self.sessions, account.external_id,
+                                {"failed_version": detail["version"]}, detail["id"], account_model=self.account_model)
         error = detail.get("error") or {}
         text = f"Обработка прервалась. {PROCESSING_ERRORS.get(error.get('code'), '')}".strip()
         buttons = [[("Повторить", f"retry:{detail['id']}")]] if error.get("retryable") else None

@@ -53,6 +53,31 @@ npm run dev --prefix frontend
 
 Бот принимает только текст в личных сообщениях. Проекты в анкете и правка карточки доступны в web. Состояние диалога хранится в БД: после перезапуска бот дошлёт вопросы, подготовленные без него.
 
+## Бот MAX
+
+Для пилота бот MAX получает сообщения через long polling вместе с backend. Публичный адрес не нужен. Запускайте один процесс на токен. Если для этого бота уже зарегистрирован webhook, снимите подписку перед запуском polling.
+
+1. Укажите `MAX_BOT_TOKEN` в `.env`. Если сертификаты Минцифры не установлены в системное хранилище, скачайте корневой и выпускающий сертификаты со страницы [Госуслуг](https://www.gosuslugi.ru/crt). Соберите из них PEM-файл и добавьте `MAX_CA_FILE=.work/max-ca.pem` в `.env`. Пример для PowerShell, если файлы сохранены в `$env:TEMP`:
+
+   ```powershell
+   .\.venv\Scripts\python.exe -m backend.cli max-ca "$env:TEMP\max-root-ca.cer" "$env:TEMP\max-sub-ca.cer"
+   ```
+
+2. Выполните миграции и перезапустите backend.
+
+   ```powershell
+   .\.venv\Scripts\python.exe -m alembic upgrade head
+   .\.venv\Scripts\python.exe -m uvicorn backend.app:create_app --factory --host 127.0.0.1 --port 8000
+   ```
+
+3. Выпустите приглашение для существующего аккаунта Modeus. Укажите опубликованный никнейм бота, чтобы получить ссылку. Команда также выводит `/start <код>` для ручного ввода в личном чате.
+
+   ```powershell
+   .\.venv\Scripts\python.exe -m backend.cli max-invite expert@example.com --bot BOT_USERNAME
+   ```
+
+В MAX используются та же анкета, интервью и карточки аккаунта. Приглашение одноразовое. После привязки нажмите «Начать интервью» или отправьте `/new`.
+
 ## LLM: настоящий проверочный запрос
 
 В `.env` указать `LLM_BASE_URL` (точный OpenAI-совместимый API root), `LLM_MODEL` и при необходимости `LLM_API_KEY`. Затем:
@@ -276,4 +301,4 @@ Windows: `winget install PostgreSQL.PostgreSQL.18`, затем те же три 
 $env:TEST_DATABASE_URL="postgresql+psycopg://modeus:modeus@localhost/postgres"; .venv/Scripts/python.exe -m pytest -q
 ```
 
-Текущая вершина миграций — `0025`. Хранение описано в `backend/db.py`, вход — в `backend/auth.py` и `backend/security.py`. За цикл интервью отвечают `backend/interview_api.py`, `backend/interview_worker.py` и `backend/interview_engine.py`. Публикация и каталог находятся в `backend/card_api.py`, Telegram-бот — в `backend/telegram_bot.py`, код web — в `frontend/src`.
+Текущая вершина миграций — `0026`. Хранение описано в `backend/db.py`, вход — в `backend/auth.py` и `backend/security.py`. За цикл интервью отвечают `backend/interview_api.py`, `backend/interview_worker.py` и `backend/interview_engine.py`. Публикация и каталог находятся в `backend/card_api.py`, боты — в `backend/telegram_bot.py` и `backend/max_bot.py`, код web — в `frontend/src`.

@@ -12,6 +12,11 @@ def no_embedding_model(monkeypatch):
     monkeypatch.setenv("EMBEDDING_BASE_URL", "")
 
 
+@pytest.fixture(autouse=True)
+def no_live_max_bot(monkeypatch):
+    monkeypatch.setenv("MAX_BOT_TOKEN", "")
+
+
 @pytest.fixture
 def database_url(tmp_path):
     """A fresh empty database: SQLite by default, PostgreSQL when TEST_DATABASE_URL points to a server."""

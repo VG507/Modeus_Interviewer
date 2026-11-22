@@ -2,7 +2,9 @@ import argparse
 import asyncio
 import getpass
 import json
+import ssl
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 from pydantic import ValidationError
@@ -82,6 +84,14 @@ def main():
     invite = sub.add_parser("telegram-invite", help="Create a one-time link to the Telegram bot for a user")
     invite.add_argument("email")
     invite.add_argument("--hours", type=number_between(1, 720), default=INVITE_HOURS)
+    max_invite = sub.add_parser("max-invite", help="Create a one-time /start command for the MAX bot")
+    max_invite.add_argument("email")
+    max_invite.add_argument("--hours", type=number_between(1, 720), default=INVITE_HOURS)
+    max_invite.add_argument("--bot", help="Published MAX bot username, for a clickable invite")
+    max_ca = sub.add_parser("max-ca", help="Build the MAX TLS bundle from two official CA files")
+    max_ca.add_argument("root", type=Path)
+    max_ca.add_argument("issuer", type=Path)
+    max_ca.add_argument("--output", type=Path, default=Path(".work/max-ca.pem"))
     sub.add_parser("check-llm")
     forget = sub.add_parser("clear-llm-cache", help="Forget stored model answers so the model is asked again")
     forget.add_argument("--model", help="Only answers of this model")
@@ -185,7 +195,22 @@ def main():
             engine.dispose()
         print(json.dumps({"deleted": count}))
         return
-    if args.command == "telegram-invite":
+    if args.command == "max-ca":
+        context = ssl.create_default_context()
+        certificates = []
+        for path in (args.root, args.issuer):
+            try:
+                data = path.read_bytes()
+                pem = data.decode("ascii") if data.lstrip().startswith(b"-----BEGIN") else ssl.DER_cert_to_PEM_cert(data)
+                context.load_verify_locations(cadata=pem)
+            except (OSError, ValueError) as exc:
+                parser.error(f"Invalid CA file {path}: {exc}")
+            certificates.append(pem.strip())
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text("\n".join(certificates) + "\n", encoding="ascii")
+        print(args.output.as_posix())
+        return
+    if args.command in {"telegram-invite", "max-invite"}:
         engine, sessions = database(settings.database_url)
         try:
             code = create_invite(sessions, args.email.strip().lower(), args.hours)
@@ -193,7 +218,12 @@ def main():
             engine.dispose()
         if code is None:
             parser.error("User not found")
-        print(json.dumps({"start": f"/start {code}", "link": invite_link(settings, code)}))
+        result = {"start": f"/start {code}"}
+        if args.command == "telegram-invite":
+            result["link"] = invite_link(settings, code)
+        elif args.bot:
+            result["link"] = f"https://max.ru/{quote(args.bot.removeprefix('@'), safe='')}?start={code}"
+        print(json.dumps(result))
         return
     if args.command == "import-sources":
         engine, sessions = database(settings.database_url)

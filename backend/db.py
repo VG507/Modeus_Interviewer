@@ -7,7 +7,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, synonym
 
 
 def now():
@@ -45,6 +45,16 @@ class LoginSession(Base):
 class TelegramAccount(Base):
     __tablename__ = "telegram_accounts"
     telegram_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    external_id = synonym("telegram_id")
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), unique=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger)
+    state: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class MaxAccount(Base):
+    __tablename__ = "max_accounts"
+    external_id: Mapped[int] = mapped_column("max_id", BigInteger, primary_key=True, autoincrement=False)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), unique=True)
     chat_id: Mapped[int] = mapped_column(BigInteger)
     state: Mapped[dict] = mapped_column(JSON, default=dict)

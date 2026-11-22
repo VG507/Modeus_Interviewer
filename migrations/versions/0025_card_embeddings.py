@@ -8,8 +8,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.types import UserDefinedType
 
-revision = "0022"
-down_revision = "0021"
+revision = "0025"
+down_revision = "0024"
 branch_labels = None
 depends_on = None
 
@@ -37,24 +37,28 @@ def pgvector(bind):
 
 
 def upgrade():
+    # The upstream branch originally created these tables under revision 0022.
+    tables = set() if op.get_context().as_sql else set(sa.inspect(op.get_bind()).get_table_names())
     vector = Vector() if pgvector(op.get_bind()) else sa.Text()
-    op.create_table(
-        "card_embeddings",
-        sa.Column("card_id", sa.String(36), sa.ForeignKey("knowledge_cards.id"), primary_key=True),
-        sa.Column("case_index", sa.Integer(), primary_key=True),
-        sa.Column("model", sa.String(200), nullable=False),
-        sa.Column("text_hash", sa.String(64), nullable=False),
-        sa.Column("embedding", vector, nullable=False),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-    )
+    if "card_embeddings" not in tables:
+        op.create_table(
+            "card_embeddings",
+            sa.Column("card_id", sa.String(36), sa.ForeignKey("knowledge_cards.id"), primary_key=True),
+            sa.Column("case_index", sa.Integer(), primary_key=True),
+            sa.Column("model", sa.String(200), nullable=False),
+            sa.Column("text_hash", sa.String(64), nullable=False),
+            sa.Column("embedding", vector, nullable=False),
+            sa.Column("created_at", sa.DateTime(), nullable=False),
+        )
     # Vectors of other texts by content, e.g. vacancy duties matched against interview cases.
-    op.create_table(
-        "text_embeddings",
-        sa.Column("model", sa.String(200), primary_key=True),
-        sa.Column("text_hash", sa.String(64), primary_key=True),
-        sa.Column("embedding", vector, nullable=False),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-    )
+    if "text_embeddings" not in tables:
+        op.create_table(
+            "text_embeddings",
+            sa.Column("model", sa.String(200), primary_key=True),
+            sa.Column("text_hash", sa.String(64), primary_key=True),
+            sa.Column("embedding", vector, nullable=False),
+            sa.Column("created_at", sa.DateTime(), nullable=False),
+        )
 
 
 def downgrade():

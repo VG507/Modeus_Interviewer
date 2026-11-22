@@ -1,5 +1,7 @@
 """Store O*NET occupation tasks for Modeus profiles."""
 
+from importlib import import_module
+
 import sqlalchemy as sa
 from alembic import op
 
@@ -10,6 +12,9 @@ depends_on = None
 
 
 def upgrade():
+    # A database at 0022 from the embeddings branch has no ESCO table yet.
+    if not op.get_context().as_sql and not sa.inspect(op.get_bind()).has_table("esco_profiles"):
+        import_module("migrations.versions.0022_esco_profiles").upgrade()
     op.create_table(
         "onet_profiles",
         sa.Column("profession_id", sa.String(32), sa.ForeignKey("vacancy_collections.profession_id"), primary_key=True),

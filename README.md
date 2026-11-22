@@ -241,7 +241,7 @@ ollama pull bge-m3
 | Похожий случай первым | 9/11 | 10/11 | 1/11 |
 | Подсказка из вакансии: верная / неверная | 16 / 1 из 41 | 25 / 1 из 41 | 26 / 15 из 41 |
 
-Вектор запроса bge-m3 считается за 20–40 мс. В базе: таблицы `card_embeddings` и `text_embeddings` (миграция `0022`); на PostgreSQL с pgvector поиск идёт в SQL, иначе в Python. `copy-database` эти таблицы не переносит: фоновая индексация пересчитает их сама.
+Вектор запроса bge-m3 считается за 20–40 мс. В базе: таблицы `card_embeddings` и `text_embeddings` (миграция `0025`); на PostgreSQL с pgvector поиск идёт в SQL, иначе в Python. `copy-database` эти таблицы не переносит: фоновая индексация пересчитает их сама.
 
 ## PostgreSQL
 
@@ -276,4 +276,4 @@ Windows: `winget install PostgreSQL.PostgreSQL.18`, затем те же три 
 $env:TEST_DATABASE_URL="postgresql+psycopg://modeus:modeus@localhost/postgres"; .venv/Scripts/python.exe -m pytest -q
 ```
 
-Текущая вершина миграций — `0022`. Хранение описано в `backend/db.py`, вход — в `backend/auth.py` и `backend/security.py`. За цикл интервью отвечают `backend/interview_api.py`, `backend/interview_worker.py` и `backend/interview_engine.py`. Публикация и каталог находятся в `backend/card_api.py`, Telegram-бот — в `backend/telegram_bot.py`, код web — в `frontend/src`.
+Текущая вершина миграций — `0025`. Хранение описано в `backend/db.py`, вход — в `backend/auth.py` и `backend/security.py`. За цикл интервью отвечают `backend/interview_api.py`, `backend/interview_worker.py` и `backend/interview_engine.py`. Публикация и каталог находятся в `backend/card_api.py`, Telegram-бот — в `backend/telegram_bot.py`, код web — в `frontend/src`.
